@@ -1,0 +1,20 @@
+[
+  {
+    "id": "8675497e5d8841ddabab4074edb9d923",
+    "fund_name": "易方达全球成长精选混合 QDII C",
+    "monthly_amount": 800.0,
+    "monthly_day": 20,
+    "investment_goal": "长期持有三年以上，作为海外资产配置的一部分",
+    "max_drawdown": "20%",
+    "updated_at": "2026-07-05 16:15:10"
+  },
+  {
+    "id": "52b7d8ec211d4852b4432f5d99945337",
+    "fund_name": "易方达全球成长精选混合QDII A",
+    "monthly_amount": 100.0,
+    "monthly_day": 10,
+    "investment_goal": "持有期一年左右，作为核心的海外资产配置",
+    "max_drawdown": "10%",
+    "updated_at": "2026-07-04 15:40:43"
+  }
+]

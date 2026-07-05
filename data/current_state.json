@@ -1,0 +1,16 @@
+{
+  "latest_operation": {
+    "fund_name": "易方达全球成长精选混合QDII A",
+    "operation_date": "2026-07-05",
+    "operation_type": "计划内定投",
+    "amount": 0.0,
+    "created_at": "2026-07-05 13:21:45"
+  },
+  "qa_answers": {
+    "is_planned": "是",
+    "emotion_reason": "没有明显影响",
+    "cash_flow": "不会",
+    "can_accept_loss": "能接受"
+  },
+  "behavior_diagnosis": {}
+}
