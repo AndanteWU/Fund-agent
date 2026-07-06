@@ -2,6 +2,7 @@
 
 from datetime import date, datetime
 from html import escape
+import json
 from uuid import uuid4
 
 import streamlit as st
@@ -444,8 +445,49 @@ def show_behavior_chain(diagnosis):
             st.write(paragraph)
         st.divider()
 
+def parse_diagnosis_payload(payload):
+    """Parse stored diagnosis safely without exposing raw model output."""
+    if isinstance(payload, dict):
+        if payload.get("raw_text"):
+            return {
+                "structure_error": True,
+                "error_message": "历史诊断记录结构异常，已停止展示原始内容。",
+                "risks": ["该记录来自旧版非结构化返回，不能作为本次行为诊断依据。"],
+                "suggestions": ["建议重新生成一次行为诊断报告。"],
+                "final_disclaimer": payload.get("final_disclaimer") or FINAL_DISCLAIMER,
+            }
+        return payload
+
+    if isinstance(payload, str):
+        try:
+            parsed = json.loads(payload.strip())
+        except json.JSONDecodeError:
+            return {
+                "structure_error": True,
+                "error_message": "AI 返回结构异常，已停止展示原始内容。",
+                "risks": ["报告未通过 JSON 结构校验，不能作为行为诊断依据。"],
+                "suggestions": ["请重新生成报告，或补充更清晰的操作理由后再试。"],
+                "final_disclaimer": FINAL_DISCLAIMER,
+            }
+        return parsed if isinstance(parsed, dict) else {
+            "structure_error": True,
+            "error_message": "AI 返回不是有效的 JSON 对象。",
+            "risks": ["报告结构不完整，不能作为行为诊断依据。"],
+            "suggestions": ["请重新生成报告。"],
+            "final_disclaimer": FINAL_DISCLAIMER,
+        }
+
+    return {
+        "structure_error": True,
+        "error_message": "本次操作未生成可用的结构化诊断。",
+        "risks": ["没有可渲染的行为诊断数据。"],
+        "suggestions": ["完成操作问答后重新生成诊断报告。"],
+        "final_disclaimer": FINAL_DISCLAIMER,
+    }
+
 def show_diagnosis_report(diagnosis):
-    """Display the educational behavior finance report."""
+    """Display the educational behavior finance report from structured fields."""
+    diagnosis = parse_diagnosis_payload(diagnosis)
     if not diagnosis:
         st.info("本次操作未进行行为诊断。")
         return
@@ -453,14 +495,24 @@ def show_diagnosis_report(diagnosis):
     st.subheader("行为诊断报告")
     st.caption("这份报告用于帮助理解投资行为背后的心理机制，不提供交易信号。")
 
-    if diagnosis.get("raw_text"):
-        if diagnosis.get("format_warning"):
-            st.warning(diagnosis.get("format_warning"))
-        st.info(diagnosis.get("raw_text"))
+    if diagnosis.get("structure_error"):
+        st.warning(diagnosis.get("error_message") or "AI 返回结构异常，无法展示诊断报告。")
+        risks = diagnosis.get("risks") or []
+        if risks:
+            st.warning("\n".join(f"- {item}" for item in risks))
+        suggestions = diagnosis.get("suggestions") or []
+        if suggestions:
+            st.markdown("**可尝试的处理方式**")
+            for item in suggestions:
+                st.markdown(f"- {item}")
         st.warning(diagnosis.get("final_disclaimer") or FINAL_DISCLAIMER)
         return
 
-    score = get_score_value(diagnosis.get("rationality_score"))
+    score = get_score_value(diagnosis.get("score", diagnosis.get("rationality_score")))
+    explanation = diagnosis.get("explanation") or diagnosis.get("score_explanation") or "暂无评分解释。"
+    suggestions = diagnosis.get("suggestions") or []
+    risks = diagnosis.get("risks") or []
+
     score_col, desc_col = st.columns([1, 2])
     with score_col:
         st.metric("理性评分", "暂无" if score is None else f"{score} / 100")
@@ -468,10 +520,16 @@ def show_diagnosis_report(diagnosis):
             st.progress(max(0, min(100, int(score))) / 100)
     with desc_col:
         st.info("该评分只代表本次投资行为的理性程度，不代表收益率，不代表操作正确性，也不代表买卖建议。")
-        if diagnosis.get("score_explanation"):
-            st.write(diagnosis.get("score_explanation"))
-        if diagnosis.get("improvement_suggestion"):
-            st.caption(f"改进方向：{diagnosis.get('improvement_suggestion')}")
+        st.markdown(explanation)
+
+    if risks:
+        st.warning("\n".join(f"- {item}" for item in risks))
+
+    if suggestions:
+        with st.container():
+            st.markdown("**行为改进方向**")
+            for item in suggestions:
+                st.markdown(f"- {item}")
 
     show_behavior_chain(diagnosis)
 
@@ -964,6 +1022,8 @@ with personality_tab:
             for item in profile.get("suggestions", []):
                 st.write(f"- {item}")
         st.caption("以上内容仅用于行为优化和心理建模，不构成任何买入、卖出、加仓或减仓建议。")
+
+
 
 
 

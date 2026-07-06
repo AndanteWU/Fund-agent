@@ -57,10 +57,15 @@ FALLBACK_HISTORY_POOL = [
     },
 ]
 
-def build_fallback_diagnosis(message):
-    """Return a safe diagnosis shape when the AI call or JSON parsing fails."""
+def build_fallback_diagnosis(message="AI 返回结构异常，暂时无法生成完整诊断。"):
+    """Return a safe diagnosis shape without exposing raw model output."""
     return {
-        "raw_text": message,
+        "structure_error": True,
+        "error_message": "AI 返回结构异常，已停止展示原始内容。请稍后重新生成诊断报告。",
+        "score": None,
+        "explanation": "本次 AI 返回内容没有通过严格 JSON 校验，因此未生成结构化报告。",
+        "suggestions": ["重新生成报告前，可以先检查操作理由是否填写清楚。"],
+        "risks": ["报告结构异常，不能作为行为诊断依据。"],
         "rationality_score": None,
         "score_explanation": "",
         "improvement_suggestion": "",
@@ -75,24 +80,8 @@ def build_fallback_diagnosis(message):
 
 
 def extract_json(text):
-    """Parse model output as JSON, with a fallback for fenced JSON blocks."""
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-
-    cleaned = text.strip()
-    if cleaned.startswith("```"):
-        cleaned = cleaned.strip("`").strip()
-        if cleaned.startswith("json"):
-            cleaned = cleaned[4:].strip()
-
-    start = cleaned.find("{")
-    end = cleaned.rfind("}")
-    if start != -1 and end != -1 and end > start:
-        return json.loads(cleaned[start : end + 1])
-
-    raise json.JSONDecodeError("No JSON object found", text, 0)
+    """Strictly parse model output as JSON. Mixed text is rejected."""
+    return json.loads((text or "").strip())
 
 
 def normalize_bias_dimensions(items):
@@ -168,18 +157,39 @@ def normalize_history_stories(items, legacy_text=""):
 
     return random.sample(FALLBACK_HISTORY_POOL, k=min(3, len(FALLBACK_HISTORY_POOL)))
 
+def normalize_list(value):
+    """Normalize optional list-like fields returned by the model."""
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str) and value.strip():
+        return [value.strip()]
+    return []
+
+
 def normalize_behavior_diagnosis(data):
-    """Normalize AI JSON into the fields used by the Streamlit page."""
+    """Normalize strict AI JSON into fields used by the Streamlit page."""
+    score = data.get("score", data.get("rationality_score"))
+    explanation = data.get("explanation") or data.get("behavioral_explanation", "")
+    suggestions = normalize_list(data.get("suggestions"))
+    if data.get("improvement_suggestion"):
+        suggestions.append(str(data.get("improvement_suggestion")).strip())
+    risks = normalize_list(data.get("risks"))
+
+    checklist = normalize_list(data.get("checklist"))
     return {
-        "rationality_score": data.get("rationality_score"),
+        "score": score,
+        "explanation": explanation,
+        "suggestions": suggestions,
+        "risks": risks,
+        "rationality_score": score,
         "score_explanation": data.get("score_explanation", ""),
         "improvement_suggestion": data.get("improvement_suggestion", ""),
         "bias_dimensions": normalize_bias_dimensions(data.get("bias_dimensions", [])),
-        "behavioral_explanation": data.get("behavioral_explanation", ""),
+        "behavioral_explanation": explanation,
         "decision_chain": normalize_decision_chain(data.get("decision_chain", [])),
         "historical_stories": normalize_history_stories(data.get("historical_stories", []), data.get("historical_analogy", "")),
         "historical_analogy": data.get("historical_analogy", ""),
-        "checklist": data.get("checklist", []),
+        "checklist": checklist,
         "final_disclaimer": data.get("final_disclaimer") or FINAL_DISCLAIMER,
     }
 
@@ -225,8 +235,12 @@ def analyze_operation_reason(
 7. 不把行为偏差等同于用户一定错误，只说明需要进一步确认；
 8. 面向投资新手解释，语言通俗、克制、有故事感和教育意义。
 
-请严格返回 JSON，不要输出 Markdown，不要输出代码块。
+请严格返回一个合法 JSON object。不要输出 Markdown，不要输出代码块，不要在 JSON 前后添加任何自然语言。
 JSON 字段必须包括：
+- score: 0 到 100 的整数，只代表本次投资行为理性程度，不代表收益率、不代表操作正确性、不代表买卖建议。
+- explanation: 字符串，用结构化摘要解释本次行为诊断结论。
+- suggestions: 数组，包含 3 到 5 条行为层面的改进方向，只能围绕记录理由、检查计划、现金流和风险承受。
+- risks: 数组，包含 1 到 3 条风险提醒，只能围绕情绪影响、计划偏离、现金流压力或风险承受边界。
 - rationality_score: 0 到 100 的整数，只代表本次投资行为理性程度，不代表收益率、不代表操作正确性、不代表买卖建议。
 - score_explanation: 1 到 2 句话解释评分原因。
 - improvement_suggestion: 1 到 2 句话，给出行为改进建议，只能围绕记录理由、检查计划、现金流和风险承受，不给任何具体买卖操作建议。
@@ -239,7 +253,7 @@ JSON 字段必须包括：
 """
 
     user_prompt = f"""
-请根据下面这次基金定投相关操作，生成一份“行为诊断报告”，并严格输出 JSON。
+请根据下面这次基金定投相关操作，生成一份“行为诊断报告”，并严格输出一个合法 JSON object。不要在 JSON 前后添加任何解释文字。
 
 操作类型：{operation_type}
 是否符合定投计划：{is_planned}
@@ -258,6 +272,7 @@ JSON 字段必须包括：
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
+            response_format={"type": "json_object"},
             temperature=0.55,
         )
 
@@ -266,12 +281,13 @@ JSON 字段必须包括：
             data = extract_json(content)
             return normalize_behavior_diagnosis(data)
         except json.JSONDecodeError:
-            diagnosis = build_fallback_diagnosis(content)
-            diagnosis["format_warning"] = "AI 返回格式不完全标准，以下为原始分析文本。"
-            return diagnosis
+            return build_fallback_diagnosis()
 
     except Exception as error:
         return build_fallback_diagnosis(f"AI 分析失败：{error}")
+
+
+
 
 
 
