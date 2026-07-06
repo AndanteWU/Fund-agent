@@ -10,7 +10,6 @@ from agent_logic import generate_conversation_check, generate_operation_check
 from data_manager import (
     add_plan,
     add_transaction,
-    create_sample_plans,
     ensure_data_files,
     get_selected_plan as load_selected_plan,
     load_plans,
@@ -649,10 +648,6 @@ with plan_tab:
             st.subheader("已保存计划")
             if not plans:
                 st.info("当前还没有定投计划，请先新增一个基金计划。")
-                if st.button("加载示例数据", use_container_width=True):
-                    create_sample_plans(st.session_state.user_id)
-                    reset_operation_flow()
-                    st.rerun()
             else:
                 for index, plan in enumerate(plans, start=1):
                     plan_id = plan.get("plan_id") or plan.get("id")
@@ -671,13 +666,6 @@ with plan_tab:
                     )
                     st.divider()
 
-                if st.button("加载示例数据", use_container_width=True, help="仅在没有计划时会写入示例数据。"):
-                    if plans:
-                        st.info("当前已有计划，不会重复加载示例数据。")
-                    else:
-                        create_sample_plans(st.session_state.user_id)
-                        reset_operation_flow()
-                        st.rerun()
 
     with form_col:
         editing_plan = selected_plan or {}
@@ -953,6 +941,7 @@ with personality_tab:
             for item in profile.get("suggestions", []):
                 st.write(f"- {item}")
         st.caption("以上内容仅用于行为优化和心理建模，不构成任何买入、卖出、加仓或减仓建议。")
+
 
 
 
