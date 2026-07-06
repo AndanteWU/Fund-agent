@@ -16,7 +16,7 @@ DEFAULT_TRANSACTIONS = []
 
 
 def default_plan_data():
-    """Return an empty multi-plan structure for a new temporary user."""
+    """Return an empty multi-plan structure for a newly authenticated user."""
     return {"plans": [], "selected_plan_id": None}
 
 
@@ -28,8 +28,8 @@ def default_current_state():
 def get_user_dir(user_id=None):
     """Return the storage folder for one user.
 
-    New authenticated users use data/{user_id}. The old data/users/{user_id}
-    path is still read when it already exists, so legacy demo links keep working.
+    Authenticated users use data/{user_id}. The old data/users/{user_id}
+    path is still read when it already exists, so previous local data remains available.
     """
     if not user_id:
         return DATA_DIR
@@ -72,7 +72,7 @@ def write_json(file_path, data):
 
 
 def ensure_data_files(user_id=None):
-    """Create empty JSON files for global data or one temporary user."""
+    """Create empty JSON files for global data or one authenticated user."""
     DATA_DIR.mkdir(exist_ok=True)
     files = get_user_files(user_id)
 
@@ -145,7 +145,7 @@ def normalize_plan_data(data):
 
 
 def load_plan_data(user_id=None):
-    """Load the full multi-plan JSON data for one temporary user."""
+    """Load the full multi-plan JSON data for one authenticated user."""
     ensure_data_files(user_id)
     files = get_user_files(user_id)
     data = normalize_plan_data(read_json(files["plan"], default_plan_data()))
@@ -154,7 +154,7 @@ def load_plan_data(user_id=None):
 
 
 def save_plan_data(user_id, data):
-    """Save the full multi-plan JSON data for one temporary user."""
+    """Save the full multi-plan JSON data for one authenticated user."""
     normalized = normalize_plan_data(data)
     files = get_user_files(user_id)
     write_json(files["plan"], normalized)
@@ -162,7 +162,7 @@ def save_plan_data(user_id, data):
 
 
 def load_plans(user_id=None):
-    """Load all saved investment plans for one temporary user."""
+    """Load all saved investment plans for one authenticated user."""
     return load_plan_data(user_id).get("plans", [])
 
 
@@ -207,7 +207,7 @@ def set_selected_plan(user_id, plan_id):
 
 
 def get_selected_plan(user_id=None):
-    """Return the currently selected plan for one temporary user."""
+    """Return the currently selected plan for one authenticated user."""
     data = load_plan_data(user_id)
     selected_plan_id = data.get("selected_plan_id")
     for plan in data.get("plans", []):
@@ -267,7 +267,7 @@ def save_plan(plan, user_id=None):
 
 
 def load_transactions(user_id=None):
-    """Load all saved transaction records for one temporary user."""
+    """Load all saved transaction records for one authenticated user."""
     ensure_data_files(user_id)
     files = get_user_files(user_id)
     transactions = read_json(files["transactions"], [])
@@ -275,13 +275,13 @@ def load_transactions(user_id=None):
 
 
 def save_transactions(transactions, user_id=None):
-    """Save the whole transaction list for one temporary user."""
+    """Save the whole transaction list for one authenticated user."""
     files = get_user_files(user_id)
     write_json(files["transactions"], transactions)
 
 
 def add_transaction(transaction, user_id=None):
-    """Append one transaction record and save it for one temporary user."""
+    """Append one transaction record and save it for one authenticated user."""
     transactions = load_transactions(user_id)
     transactions.append(transaction)
     save_transactions(transactions, user_id)
@@ -289,7 +289,7 @@ def add_transaction(transaction, user_id=None):
 
 
 def load_current_state(user_id=None):
-    """Load the latest behavior decision loop state for one temporary user."""
+    """Load the latest behavior decision loop state for one authenticated user."""
     ensure_data_files(user_id)
     files = get_user_files(user_id)
     state = read_json(files["current_state"], default_current_state())
@@ -301,4 +301,8 @@ def save_current_state(state, user_id=None):
     files = get_user_files(user_id)
     write_json(files["current_state"], state or {})
     return state or {}
+
+
+
+
 

@@ -145,13 +145,40 @@ def init_auth_state():
     st.session_state.setdefault("auth_code_expires_at", 0.0)
     st.session_state.setdefault("auth_last_sent_at", 0.0)
 
+def get_supabase_user():
+    """Reserved integration point for future Supabase Auth.
 
-def login_with_legacy_user_id(user_id):
-    """Allow old URL-based demo links to keep working."""
-    st.session_state.is_logged_in = True
-    st.session_state.user_id = user_id
-    st.session_state.email = "临时演示用户"
-    st.session_state.auth_mode = "legacy_url"
+    Return a dict like {"user_id": "user_xxx", "email": "name@example.com"}
+    when Supabase is connected. Keeping this function here lets the app switch
+    auth providers without changing business pages.
+    """
+    return None
+
+
+def get_authenticated_user():
+    """Return current authenticated user from session or future Supabase Auth."""
+    init_auth_state()
+    if st.session_state.get("is_logged_in") and st.session_state.get("user_id"):
+        return {
+            "user_id": st.session_state.get("user_id"),
+            "email": st.session_state.get("email", ""),
+            "provider": st.session_state.get("auth_mode", "email"),
+        }
+
+    supabase_user = get_supabase_user()
+    if supabase_user and supabase_user.get("user_id"):
+        st.session_state.is_logged_in = True
+        st.session_state.user_id = supabase_user["user_id"]
+        st.session_state.email = supabase_user.get("email", "")
+        st.session_state.auth_mode = "supabase"
+        return {
+            "user_id": st.session_state.user_id,
+            "email": st.session_state.email,
+            "provider": "supabase",
+        }
+
+    return None
+
 
 
 def render_login_page():
@@ -243,4 +270,6 @@ def logout():
         "auth_last_sent_at",
     ]:
         st.session_state.pop(key, None)
+
+
 

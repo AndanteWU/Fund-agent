@@ -3,11 +3,10 @@
 from datetime import date, datetime
 from html import escape
 import json
-from uuid import uuid4
 
 import streamlit as st
 
-from auth import login_with_legacy_user_id, logout, render_login_page
+from auth import get_authenticated_user, logout, render_login_page
 from agent_logic import generate_conversation_check, generate_operation_check
 from data_manager import (
     add_plan,
@@ -93,31 +92,14 @@ def inject_design_tokens():
         unsafe_allow_html=True,
     )
 
-def normalize_user_id(value):
-    """Keep a temporary user id URL-safe and simple."""
-    if isinstance(value, list):
-        value = value[0] if value else ""
-    text = str(value or "").strip()
-    cleaned = "".join(char for char in text if char.isalnum() or char in {"_", "-"})
-    if cleaned.startswith("user_") and len(cleaned) >= 8:
-        return cleaned
-    return ""
-
-
-def get_or_create_user_id():
-    """Read the current user id without mutating URL during normal render."""
-    session_user_id = normalize_user_id(st.session_state.get("user_id", ""))
-    query_user_id = normalize_user_id(st.query_params.get("user_id", ""))
-
-    if session_user_id:
-        return session_user_id
-    if query_user_id:
-        st.session_state.user_id = query_user_id
-        return query_user_id
-
-    user_id = f"user_{uuid4().hex[:6]}"
-    st.session_state.user_id = user_id
-    return user_id
+def get_current_user_id():
+    """Return authenticated user id. Anonymous fallback is intentionally disabled."""
+    user = get_authenticated_user()
+    if not user or not user.get("user_id"):
+        return ""
+    st.session_state.user_id = user["user_id"]
+    st.session_state.email = user.get("email", "")
+    return user["user_id"]
 
 
 def format_money(amount):
@@ -687,24 +669,15 @@ def initialize_state():
 
 inject_design_tokens()
 
-legacy_query_user_id = normalize_user_id(st.query_params.get("user_id", ""))
-if legacy_query_user_id and not st.session_state.get("is_logged_in"):
-    st.title("基金定投辅助决策 Agent")
-    st.info("检测到旧版临时演示链接。你可以继续使用这个临时用户，也可以清除链接后使用邮箱登录。")
-    if st.button("使用旧版临时用户继续", type="primary"):
-        login_with_legacy_user_id(legacy_query_user_id)
-        st.rerun()
-    st.stop()
-
-if not st.session_state.get("is_logged_in"):
+if not get_authenticated_user():
     auth_ok = render_login_page()
     if not auth_ok:
         st.caption("登录模块已加载。如果页面长时间无响应，请刷新后重试。")
         st.stop()
 
-user_id = get_or_create_user_id()
+user_id = get_current_user_id()
 if not user_id:
-    st.error("用户状态初始化失败，请刷新页面后重试。")
+    st.error("用户状态初始化失败，请重新登录后再试。")
     st.stop()
 
 try:
@@ -747,7 +720,7 @@ st.title("基金定投辅助决策 Agent")
 st.write("本系统是 Educational Behavioral Finance Agent，通过行为金融与金融史视角，帮助用户在定投相关操作前理解心理机制、检查纪律边界，并形成长期投资人格画像。")
 st.warning("本工具不预测市场涨跌，不评价基金好坏，不推荐基金，也不提供买入、卖出、加仓、减仓建议。")
 st.info(
-    f"当前登录邮箱：{st.session_state.get('email', '临时演示用户')}｜用户ID：{st.session_state.user_id}。数据会按 user_id 隔离保存。"
+    f"当前登录邮箱：{st.session_state.get('email', '未绑定邮箱')}｜用户ID：{st.session_state.user_id}。数据会按 user_id 隔离保存。"
 )
 if st.button("退出登录"):
     logout()
@@ -1005,7 +978,7 @@ with history_tab:
 with personality_tab:
     st.header("投资人格分析（Investment Personality）")
     st.caption("这是投资行为的长期心理画像系统，不预测市场，不提供投资建议，只做行为分析、心理建模和历史归因。")
-    st.caption("当前人格画像基于当前临时用户的全部历史操作记录，不限当前选中的基金计划。")
+    st.caption("当前人格画像基于当前登录用户的全部历史操作记录，不限当前选中的基金计划。")
 
     all_records = sync_operation_history()
     if not plans:
@@ -1059,6 +1032,9 @@ with personality_tab:
             for item in profile.get("suggestions", []):
                 st.write(f"- {item}")
         st.caption("以上内容仅用于行为优化和心理建模，不构成任何买入、卖出、加仓或减仓建议。")
+
+
+
 
 
 
