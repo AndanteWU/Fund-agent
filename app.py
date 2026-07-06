@@ -2,6 +2,7 @@
 
 from datetime import date, datetime
 from html import escape
+from uuid import uuid4
 
 import streamlit as st
 
@@ -11,7 +12,6 @@ from llm_analyzer import analyze_operation_reason
 
 
 st.set_page_config(page_title="基金定投辅助决策 Agent", page_icon="📌", layout="wide")
-ensure_data_files()
 
 FINAL_DISCLAIMER = "本分析不构成投资建议，不预测市场涨跌，也不提供买入、卖出、加仓、减仓建议。"
 QUESTION_FLOW = [
@@ -20,6 +20,29 @@ QUESTION_FLOW = [
     {"key": "cash_flow", "title": "是否影响现金流？", "type": "radio", "options": ["不会", "可能会", "会"]},
     {"key": "can_accept_loss", "title": "是否接受继续下跌 10%？", "type": "radio", "options": ["能接受", "不能接受"]},
 ]
+def normalize_user_id(value):
+    """Keep a temporary user id URL-safe and simple."""
+    if isinstance(value, list):
+        value = value[0] if value else ""
+    text = str(value or "").strip()
+    cleaned = "".join(char for char in text if char.isalnum() or char in {"_", "-"})
+    if cleaned.startswith("user_") and len(cleaned) >= 8:
+        return cleaned
+    return ""
+
+
+def get_or_create_user_id():
+    """Read a temporary user id from URL, or create one for this visitor."""
+    query_user_id = normalize_user_id(st.query_params.get("user_id", ""))
+    session_user_id = normalize_user_id(st.session_state.get("user_id", ""))
+
+    user_id = query_user_id or session_user_id or f"user_{uuid4().hex[:6]}"
+    if st.session_state.get("user_id") != user_id:
+        st.session_state.user_id = user_id
+    if st.query_params.get("user_id") != user_id:
+        st.query_params["user_id"] = user_id
+    return user_id
+
 
 def format_money(amount):
     """Format money for display."""
@@ -399,7 +422,7 @@ def show_diagnosis_report(diagnosis):
 
 def sync_operation_history():
     """Sync history from JSON into session state."""
-    records = load_transactions()
+    records = load_transactions(st.session_state.user_id)
     st.session_state.operation_history = records
     return records
 
@@ -481,7 +504,7 @@ def generate_and_save_diagnosis(show_progress=True):
         "behavior_diagnosis": diagnosis,
         "saved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
-    add_transaction(record)
+    add_transaction(record, st.session_state.user_id)
     st.session_state.diagnosis_report = diagnosis
     st.session_state.diagnosis_record_key = operation_key
     sync_operation_history()
@@ -496,7 +519,7 @@ def initialize_state():
     st.session_state.setdefault("behavior_answers", dict(st.session_state.answers))
     st.session_state.setdefault("diagnosis_report", {})
     st.session_state.setdefault("diagnosis_in_progress", False)
-    st.session_state.setdefault("operation_history", load_transactions())
+    st.session_state.setdefault("operation_history", load_transactions(st.session_state.user_id))
     st.session_state.setdefault("current_step", 0)
     st.session_state.setdefault("answered_count", count_answered_questions(st.session_state.answers, QUESTION_FLOW))
     st.session_state.setdefault("qa_step", st.session_state.current_step)
@@ -504,17 +527,39 @@ def initialize_state():
     st.session_state.setdefault("diagnosis_record_key", "")
 
 
+user_id = get_or_create_user_id()
+ensure_data_files(user_id)
+if st.session_state.get("active_user_id") != user_id:
+    st.session_state.active_user_id = user_id
+    for key in [
+        "selected_fund_plan",
+        "current_operation",
+        "answers",
+        "behavior_answers",
+        "diagnosis_report",
+        "diagnosis_in_progress",
+        "operation_history",
+        "current_step",
+        "answered_count",
+        "qa_step",
+        "step_index",
+        "diagnosis_record_key",
+    ]:
+        st.session_state.pop(key, None)
 initialize_state()
 if not st.session_state.answers and st.session_state.behavior_answers:
     st.session_state.answers = dict(st.session_state.behavior_answers)
 sync_question_state()
-plans = load_plans()
+plans = load_plans(st.session_state.user_id)
 selected_plan = get_selected_plan(plans)
 operation_history = sync_operation_history()
 
 st.title("基金定投辅助决策 Agent")
 st.write("本系统是 Educational Behavioral Finance Agent，通过行为金融与金融史视角，帮助用户在定投相关操作前理解心理机制、检查纪律边界，并形成长期投资人格画像。")
 st.warning("本工具不预测市场涨跌，不评价基金好坏，不推荐基金，也不提供买入、卖出、加仓、减仓建议。")
+st.info(
+    f"当前临时用户ID：{st.session_state.user_id}。当前版本为临时演示版，系统会为每位访问者生成一个临时 user_id，并将数据暂存在该用户目录下。保存当前链接，可以在短期内继续查看自己的演示数据。正式产品化后将升级为账号登录和云数据库存储。"
+)
 
 plan_tab, operation_tab, history_tab, personality_tab = st.tabs(["定投计划", "操作检查", "历史记录", "投资人格分析"])
 
@@ -572,7 +617,7 @@ with plan_tab:
                     "max_drawdown": max_drawdown,
                     "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 }
-                saved_plan = save_plan(plan)
+                saved_plan = save_plan(plan, st.session_state.user_id)
                 st.session_state.selected_fund_plan = saved_plan
                 st.success("定投计划已保存。")
                 st.rerun()
@@ -780,6 +825,8 @@ with personality_tab:
             for item in profile.get("suggestions", []):
                 st.write(f"- {item}")
         st.caption("以上内容仅用于行为优化和心理建模，不构成任何买入、卖出、加仓或减仓建议。")
+
+
 
 
 

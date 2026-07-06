@@ -1,25 +1,47 @@
 """Simple JSON storage helpers for the Fund DCA Decision Support Agent."""
 
 import json
+import shutil
 from pathlib import Path
 from uuid import uuid4
 
 
 DATA_DIR = Path("data")
+USERS_DIR = DATA_DIR / "users"
 PLAN_FILE = DATA_DIR / "plan.json"
 TRANSACTIONS_FILE = DATA_DIR / "transactions.json"
 CURRENT_STATE_FILE = DATA_DIR / "current_state.json"
 
 
-def ensure_data_files():
-    """Create the data folder and default JSON files if they do not exist."""
-    DATA_DIR.mkdir(exist_ok=True)
+DEFAULT_PLAN = []
+DEFAULT_TRANSACTIONS = []
 
-    if not PLAN_FILE.exists():
-        save_plans([])
 
-    if not TRANSACTIONS_FILE.exists():
-        save_transactions([])
+def default_current_state():
+    """Return the default latest-state structure for the behavior loop."""
+    return {
+        "latest_operation": {},
+        "qa_answers": {},
+        "behavior_diagnosis": {},
+    }
+
+
+def get_user_dir(user_id=None):
+    """Return the storage folder for one temporary user."""
+    if not user_id:
+        return DATA_DIR
+    safe_user_id = "".join(char for char in str(user_id) if char.isalnum() or char in {"_", "-"})
+    return USERS_DIR / safe_user_id
+
+
+def get_user_files(user_id=None):
+    """Return JSON file paths for one temporary user."""
+    base_dir = get_user_dir(user_id)
+    return {
+        "plan": base_dir / "plan.json",
+        "transactions": base_dir / "transactions.json",
+        "current_state": base_dir / "current_state.json",
+    }
 
 
 def read_json(file_path, default_value):
@@ -33,9 +55,39 @@ def read_json(file_path, default_value):
 
 def write_json(file_path, data):
     """Write data to a JSON file with readable Chinese formatting."""
-    DATA_DIR.mkdir(exist_ok=True)
+    file_path.parent.mkdir(parents=True, exist_ok=True)
     with file_path.open("w", encoding="utf-8") as file:
         json.dump(data, file, ensure_ascii=False, indent=2)
+
+
+def copy_or_create_file(source_path, target_path, default_value):
+    """Copy demo data when available, otherwise create a default JSON file."""
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    if target_path.exists():
+        return
+    if source_path.exists():
+        shutil.copyfile(source_path, target_path)
+    else:
+        write_json(target_path, default_value)
+
+
+def ensure_data_files(user_id=None):
+    """Create default JSON files for global data or one temporary user."""
+    DATA_DIR.mkdir(exist_ok=True)
+
+    if user_id:
+        files = get_user_files(user_id)
+        copy_or_create_file(PLAN_FILE, files["plan"], DEFAULT_PLAN)
+        copy_or_create_file(TRANSACTIONS_FILE, files["transactions"], DEFAULT_TRANSACTIONS)
+        copy_or_create_file(CURRENT_STATE_FILE, files["current_state"], default_current_state())
+        return
+
+    if not PLAN_FILE.exists():
+        write_json(PLAN_FILE, DEFAULT_PLAN)
+    if not TRANSACTIONS_FILE.exists():
+        write_json(TRANSACTIONS_FILE, DEFAULT_TRANSACTIONS)
+    if not CURRENT_STATE_FILE.exists():
+        write_json(CURRENT_STATE_FILE, default_current_state())
 
 
 def normalize_plan(plan):
@@ -46,14 +98,11 @@ def normalize_plan(plan):
     return normalized
 
 
-def load_plans():
-    """Load all saved investment plans.
-
-    Older versions saved one plan as a dict. This function converts that shape
-    into a list so existing demo data can still be used.
-    """
-    ensure_data_files()
-    data = read_json(PLAN_FILE, [])
+def load_plans(user_id=None):
+    """Load all saved investment plans for one temporary user."""
+    ensure_data_files(user_id)
+    files = get_user_files(user_id)
+    data = read_json(files["plan"], [])
 
     if isinstance(data, list):
         plans = [normalize_plan(item) for item in data if isinstance(item, dict)]
@@ -62,78 +111,72 @@ def load_plans():
     else:
         plans = []
 
-    save_plans(plans)
+    save_plans(plans, user_id)
     return plans
 
 
-def save_plans(plans):
-    """Save all investment plans."""
-    write_json(PLAN_FILE, [normalize_plan(plan) for plan in plans])
+def save_plans(plans, user_id=None):
+    """Save all investment plans for one temporary user."""
+    files = get_user_files(user_id)
+    write_json(files["plan"], [normalize_plan(plan) for plan in plans])
 
 
-def load_plan():
+def load_plan(user_id=None):
     """Load the first saved plan for backward compatibility."""
-    plans = load_plans()
+    plans = load_plans(user_id)
     return plans[0] if plans else {}
 
 
-def get_plan_by_id(plan_id):
+def get_plan_by_id(plan_id, user_id=None):
     """Find one plan by id."""
-    for plan in load_plans():
+    for plan in load_plans(user_id):
         if plan.get("id") == plan_id:
             return plan
     return {}
 
 
-def save_plan(plan):
-    """Create or update one investment plan."""
+def save_plan(plan, user_id=None):
+    """Create or update one investment plan for one temporary user."""
     plan = normalize_plan(plan)
-    plans = load_plans()
+    plans = load_plans(user_id)
 
     for index, existing_plan in enumerate(plans):
         if existing_plan.get("id") == plan.get("id"):
             plans[index] = plan
-            save_plans(plans)
+            save_plans(plans, user_id)
             return plan
 
     plans.append(plan)
-    save_plans(plans)
+    save_plans(plans, user_id)
     return plan
 
 
-def load_transactions():
-    """Load all saved transaction records."""
-    ensure_data_files()
-    return read_json(TRANSACTIONS_FILE, [])
+def load_transactions(user_id=None):
+    """Load all saved transaction records for one temporary user."""
+    ensure_data_files(user_id)
+    files = get_user_files(user_id)
+    return read_json(files["transactions"], [])
 
 
-def save_transactions(transactions):
-    """Save the whole transaction list."""
-    write_json(TRANSACTIONS_FILE, transactions)
+def save_transactions(transactions, user_id=None):
+    """Save the whole transaction list for one temporary user."""
+    files = get_user_files(user_id)
+    write_json(files["transactions"], transactions)
 
 
-def add_transaction(transaction):
-    """Append one transaction record and save it."""
-    transactions = load_transactions()
+def add_transaction(transaction, user_id=None):
+    """Append one transaction record and save it for one temporary user."""
+    transactions = load_transactions(user_id)
     transactions.append(transaction)
-    save_transactions(transactions)
+    save_transactions(transactions, user_id)
     return transactions
 
 
-
-def default_current_state():
-    """Return the default latest-state structure for the behavior loop."""
-    return {
-        "latest_operation": {},
-        "qa_answers": {},
-        "behavior_diagnosis": {},
-    }
-
-
-def load_current_state():
-    """Load the latest behavior decision loop state."""
-    ensure_data_files()
-    state = read_json(CURRENT_STATE_FILE, default_current_state())
+def load_current_state(user_id=None):
+    """Load the latest behavior decision loop state for one temporary user."""
+    ensure_data_files(user_id)
+    files = get_user_files(user_id)
+    state = read_json(files["current_state"], default_current_state())
     if not isinstance(state, dict):
         return default_current_state()
 
@@ -142,9 +185,10 @@ def load_current_state():
     return default_state
 
 
-def save_current_state(state):
+def save_current_state(state, user_id=None):
     """Save the latest behavior decision loop state, overwriting old state."""
     default_state = default_current_state()
     default_state.update(state or {})
-    write_json(CURRENT_STATE_FILE, default_state)
+    files = get_user_files(user_id)
+    write_json(files["current_state"], default_state)
     return default_state
