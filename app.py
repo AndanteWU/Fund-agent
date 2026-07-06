@@ -298,8 +298,37 @@ def get_flow_statuses(operation_stage):
     statuses.append("已完成" if diagnosis_done else ("进行中" if diagnosis_running else "待完成"))
     return statuses
 
+def split_summary_paragraphs(text, max_paragraphs=5):
+    """Split one long AI explanation into shorter reading paragraphs."""
+    raw_text = str(text or "暂无综合解读。").strip()
+    parts = []
+    for part in raw_text.replace("；", "。").replace(";", "。").split("。"):
+        cleaned = part.strip()
+        if cleaned:
+            parts.append(cleaned + "。")
+
+    if not parts:
+        return ["暂无综合解读。"]
+
+    paragraphs = []
+    buffer = ""
+    for part in parts:
+        if len(buffer) + len(part) <= 90:
+            buffer += part
+        else:
+            if buffer:
+                paragraphs.append(buffer)
+            buffer = part
+    if buffer:
+        paragraphs.append(buffer)
+
+    if len(paragraphs) > max_paragraphs:
+        paragraphs = paragraphs[: max_paragraphs - 1] + ["".join(paragraphs[max_paragraphs - 1:])]
+    return paragraphs
+
+
 def show_behavior_chain(diagnosis):
-    """Show a cleaner vertical behavior-finance timeline."""
+    """Show behavior finance explanation as a single-column reading timeline."""
     chain = [
         item for item in (diagnosis.get("decision_chain") or [])
         if "纪律校验" not in str(item.get("stage", ""))
@@ -314,10 +343,51 @@ def show_behavior_chain(diagnosis):
 
     st.markdown(
         """
-        <div style="margin:10px 0 18px 0;">
-            <div style="font-size:22px;font-weight:720;color:#111827;margin-bottom:4px;">行为金融解释</div>
-            <div style="color:#6b7280;line-height:1.7;">把一次操作拆成一条心理链条：信号出现、心理加工、纪律回看。它不判断市场，只帮助你看清决策是怎样形成的。</div>
-        </div>
+        <style>
+        .bf-section-title {
+            margin: 0.75rem 0 0.2rem 0;
+            font-size: 1.35rem;
+            font-weight: 720;
+            color: #111827;
+        }
+        .bf-section-subtitle {
+            margin: 0 0 1.4rem 0;
+            color: #6b7280;
+            line-height: 1.7;
+        }
+        .bf-card {
+            background: #ffffff;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 1.05rem 1.15rem;
+            margin: 0 0 1.15rem 0;
+            box-shadow: 0 1px 2px rgba(15, 23, 42, 0.025);
+        }
+        .bf-step-title {
+            font-size: 1.05rem;
+            font-weight: 700;
+            color: #111827;
+            margin-bottom: 0.75rem;
+        }
+        .bf-label {
+            font-size: 0.78rem;
+            font-weight: 650;
+            color: #6b7280;
+            margin: 0.7rem 0 0.22rem 0;
+        }
+        .bf-body {
+            color: #374151;
+            line-height: 1.85;
+            margin: 0;
+        }
+        .bf-rule {
+            height: 1px;
+            background: #f1f5f9;
+            margin: 0.75rem 0;
+        }
+        </style>
+        <div class="bf-section-title">行为金融解释</div>
+        <div class="bf-section-subtitle">以单列时间线还原一次投资操作的心理过程：先看到什么，再如何解释，最后回到纪律边界。</div>
         """,
         unsafe_allow_html=True,
     )
@@ -327,69 +397,33 @@ def show_behavior_chain(diagnosis):
         signal = escape(str(item.get("signal", "暂无触发信号")))
         psychology = escape(str(item.get("psychology", "暂无心理解释")))
         check = escape(str(item.get("discipline_check", "回到计划、现金流和风险承受边界")))
-        line_html = "" if index == len(chain) else '<div style="width:1px;background:#e5e7eb;flex:1;margin-top:10px;"></div>'
-        st.markdown(
-            f"""
-            <div style="display:flex;gap:14px;margin:0 0 14px 0;align-items:stretch;">
-                <div style="width:28px;display:flex;flex-direction:column;align-items:center;flex:0 0 auto;">
-                    <div style="width:28px;height:28px;border-radius:999px;background:#f3f4f6;color:#374151;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;border:1px solid #e5e7eb;">{index}</div>
-                    {line_html}
+
+        with st.container():
+            st.markdown(
+                f"""
+                <div class="bf-card">
+                    <div class="bf-step-title">Step {index}｜{stage}</div>
+                    <div class="bf-rule"></div>
+                    <div class="bf-label">触发信号</div>
+                    <p class="bf-body">{signal}</p>
+                    <div class="bf-rule"></div>
+                    <div class="bf-label">心理解释</div>
+                    <p class="bf-body">{psychology}</p>
+                    <div class="bf-rule"></div>
+                    <div class="bf-label">纪律校验</div>
+                    <p class="bf-body">{check}</p>
                 </div>
-                <div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:10px;padding:16px 18px;flex:1;box-shadow:0 1px 2px rgba(15,23,42,0.03);">
-                    <div style="font-size:17px;font-weight:700;color:#111827;margin-bottom:14px;">{stage}</div>
-                    <div style="display:flex;flex-direction:column;gap:12px;">
-                        <div>
-                            <div style="font-size:12px;color:#9ca3af;margin-bottom:4px;">触发信号</div>
-                            <div style="color:#374151;line-height:1.75;">{signal}</div>
-                        </div>
-                        <div style="height:1px;background:#f1f5f9;"></div>
-                        <div>
-                            <div style="font-size:12px;color:#9ca3af;margin-bottom:4px;">心理解释</div>
-                            <div style="color:#374151;line-height:1.75;">{psychology}</div>
-                        </div>
-                        <div style="height:1px;background:#f1f5f9;"></div>
-                        <div>
-                            <div style="font-size:12px;color:#9ca3af;margin-bottom:4px;">纪律校验</div>
-                            <div style="color:#374151;line-height:1.75;">{check}</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+                """,
+                unsafe_allow_html=True,
+            )
 
-    raw_explanation = diagnosis.get("behavioral_explanation") or "暂无综合解读。"
-    sentences = []
-    for part in str(raw_explanation).replace("；", "。").replace(";", "。").split("。"):
-        cleaned = part.strip()
-        if cleaned:
-            sentences.append(cleaned + "。")
-    summary_rows = [
-        ("核心机制", "".join(sentences[:2]) or str(raw_explanation)),
-        ("行为风险", "".join(sentences[2:4]) or "重点观察短期波动、他人信息或账户盈亏是否正在放大操作冲动。"),
-        ("纪律回看", "".join(sentences[4:]) or "回到原定计划、现金流安全、风险承受和操作理由四个边界。"),
-    ]
-
-    rows_html = ""
-    for label, content in summary_rows:
-        rows_html += f"""
-        <div style="padding:12px 0;border-top:1px solid #eef2f7;">
-            <div style="font-size:12px;color:#9ca3af;margin-bottom:5px;">{escape(label)}</div>
-            <div style="line-height:1.85;color:#374151;">{escape(content)}</div>
-        </div>
-        """
-
-    st.markdown(
-        f"""
-        <div style="margin-top:20px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:10px;padding:16px 18px;">
-            <div style="font-size:17px;font-weight:700;color:#111827;margin-bottom:2px;">综合解读</div>
-            <div style="color:#6b7280;font-size:13px;margin-bottom:8px;">将上面的心理链条收束为三个观察点。</div>
-            {rows_html}
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    paragraphs = split_summary_paragraphs(diagnosis.get("behavioral_explanation"), max_paragraphs=5)
+    with st.container():
+        st.markdown("### 综合解读")
+        st.caption("把上面的心理链条压缩成投研式行为摘要，便于保存后复盘。")
+        for paragraph in paragraphs:
+            st.write(paragraph)
+        st.divider()
 def show_diagnosis_report(diagnosis):
     """Display the educational behavior finance report."""
     if not diagnosis:
@@ -919,6 +953,7 @@ with personality_tab:
             for item in profile.get("suggestions", []):
                 st.write(f"- {item}")
         st.caption("以上内容仅用于行为优化和心理建模，不构成任何买入、卖出、加仓或减仓建议。")
+
 
 
 
