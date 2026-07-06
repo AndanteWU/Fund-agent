@@ -343,45 +343,67 @@ def show_behavior_chain(diagnosis):
     st.markdown(
         """
         <style>
+        :root {
+            --bf-card-bg: #ffffff;
+            --bf-card-border: #e5e7eb;
+            --bf-title: #111827;
+            --bf-body: #374151;
+            --bf-muted: #6b7280;
+            --bf-label: #6b7280;
+            --bf-rule: #f1f5f9;
+            --bf-shadow: 0 1px 2px rgba(15, 23, 42, 0.025);
+        }
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bf-card-bg: #111827;
+                --bf-card-border: #2b3442;
+                --bf-title: #f3f4f6;
+                --bf-body: #d1d5db;
+                --bf-muted: #9ca3af;
+                --bf-label: #aeb7c4;
+                --bf-rule: #263241;
+                --bf-shadow: none;
+            }
+        }
         .bf-section-title {
             margin: 0.75rem 0 0.2rem 0;
             font-size: 1.35rem;
             font-weight: 720;
-            color: #111827;
+            color: var(--bf-title);
         }
         .bf-section-subtitle {
             margin: 0 0 1.4rem 0;
-            color: #6b7280;
+            color: var(--bf-muted);
             line-height: 1.7;
         }
         .bf-card {
-            background: #ffffff;
-            border: 1px solid #e5e7eb;
+            background: var(--bf-card-bg);
+            border: 1px solid var(--bf-card-border);
             border-radius: 8px;
             padding: 1.05rem 1.15rem;
             margin: 0 0 1.15rem 0;
-            box-shadow: 0 1px 2px rgba(15, 23, 42, 0.025);
+            box-shadow: var(--bf-shadow);
         }
         .bf-step-title {
             font-size: 1.05rem;
             font-weight: 700;
-            color: #111827;
+            color: var(--bf-title);
             margin-bottom: 0.75rem;
         }
         .bf-label {
             font-size: 0.78rem;
             font-weight: 650;
-            color: #6b7280;
+            color: var(--bf-label);
             margin: 0.7rem 0 0.22rem 0;
         }
         .bf-body {
-            color: #374151;
+            color: var(--bf-body);
             line-height: 1.85;
             margin: 0;
         }
         .bf-rule {
             height: 1px;
-            background: #f1f5f9;
+            background: var(--bf-rule);
             margin: 0.75rem 0;
         }
         </style>
@@ -941,6 +963,7 @@ with personality_tab:
             for item in profile.get("suggestions", []):
                 st.write(f"- {item}")
         st.caption("以上内容仅用于行为优化和心理建模，不构成任何买入、卖出、加仓或减仓建议。")
+
 
 
 
