@@ -78,9 +78,9 @@ def generate_code():
 
 
 def generate_user_id(email):
-    """Create a stable-looking user id after successful email verification."""
-    timestamp = str(time.time_ns())
-    digest = hashlib.sha256(f"{email}:{timestamp}".encode("utf-8")).hexdigest()[:12]
+    """Create a stable user id for one email address."""
+    normalized_email = normalize_email(email)
+    digest = hashlib.sha256(normalized_email.encode("utf-8")).hexdigest()[:12]
     return f"user_{digest}"
 
 
@@ -243,3 +243,4 @@ def logout():
         "auth_last_sent_at",
     ]:
         st.session_state.pop(key, None)
+

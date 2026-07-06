@@ -105,15 +105,18 @@ def normalize_user_id(value):
 
 
 def get_or_create_user_id():
-    """Read logged-in user id, or keep old URL-based demo links working."""
-    query_user_id = normalize_user_id(st.query_params.get("user_id", ""))
+    """Read the current user id without mutating URL during normal render."""
     session_user_id = normalize_user_id(st.session_state.get("user_id", ""))
+    query_user_id = normalize_user_id(st.query_params.get("user_id", ""))
 
-    user_id = session_user_id or query_user_id or f"user_{uuid4().hex[:6]}"
-    if st.session_state.get("user_id") != user_id:
-        st.session_state.user_id = user_id
-    if st.query_params.get("user_id") != user_id:
-        st.query_params["user_id"] = user_id
+    if session_user_id:
+        return session_user_id
+    if query_user_id:
+        st.session_state.user_id = query_user_id
+        return query_user_id
+
+    user_id = f"user_{uuid4().hex[:6]}"
+    st.session_state.user_id = user_id
     return user_id
 
 
@@ -686,13 +689,30 @@ inject_design_tokens()
 
 legacy_query_user_id = normalize_user_id(st.query_params.get("user_id", ""))
 if legacy_query_user_id and not st.session_state.get("is_logged_in"):
-    login_with_legacy_user_id(legacy_query_user_id)
-
-if not render_login_page():
+    st.title("基金定投辅助决策 Agent")
+    st.info("检测到旧版临时演示链接。你可以继续使用这个临时用户，也可以清除链接后使用邮箱登录。")
+    if st.button("使用旧版临时用户继续", type="primary"):
+        login_with_legacy_user_id(legacy_query_user_id)
+        st.rerun()
     st.stop()
 
+if not st.session_state.get("is_logged_in"):
+    auth_ok = render_login_page()
+    if not auth_ok:
+        st.caption("登录模块已加载。如果页面长时间无响应，请刷新后重试。")
+        st.stop()
+
 user_id = get_or_create_user_id()
-ensure_data_files(user_id)
+if not user_id:
+    st.error("用户状态初始化失败，请刷新页面后重试。")
+    st.stop()
+
+try:
+    ensure_data_files(user_id)
+except Exception as error:
+    st.error("用户数据目录初始化失败，请刷新页面后重试。")
+    st.exception(error)
+    st.stop()
 if st.session_state.get("active_user_id") != user_id:
     st.session_state.active_user_id = user_id
     for key in [
@@ -710,13 +730,18 @@ if st.session_state.get("active_user_id") != user_id:
         "diagnosis_record_key",
     ]:
         st.session_state.pop(key, None)
-initialize_state()
-if not st.session_state.answers and st.session_state.behavior_answers:
-    st.session_state.answers = dict(st.session_state.behavior_answers)
-sync_question_state()
-plans = load_plans(st.session_state.user_id)
-selected_plan = get_selected_plan(plans)
-operation_history = sync_operation_history()
+try:
+    initialize_state()
+    if not st.session_state.answers and st.session_state.behavior_answers:
+        st.session_state.answers = dict(st.session_state.behavior_answers)
+    sync_question_state()
+    plans = load_plans(st.session_state.user_id)
+    selected_plan = get_selected_plan(plans)
+    operation_history = sync_operation_history()
+except Exception as error:
+    st.error("页面初始化失败，请刷新后重试。")
+    st.exception(error)
+    st.stop()
 
 st.title("基金定投辅助决策 Agent")
 st.write("本系统是 Educational Behavioral Finance Agent，通过行为金融与金融史视角，帮助用户在定投相关操作前理解心理机制、检查纪律边界，并形成长期投资人格画像。")
@@ -1034,6 +1059,8 @@ with personality_tab:
             for item in profile.get("suggestions", []):
                 st.write(f"- {item}")
         st.caption("以上内容仅用于行为优化和心理建模，不构成任何买入、卖出、加仓或减仓建议。")
+
+
 
 
 
