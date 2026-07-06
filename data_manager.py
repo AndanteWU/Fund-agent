@@ -26,20 +26,32 @@ def default_current_state():
 
 
 def get_user_dir(user_id=None):
-    """Return the storage folder for one temporary user."""
+    """Return the storage folder for one user.
+
+    New authenticated users use data/{user_id}. The old data/users/{user_id}
+    path is still read when it already exists, so legacy demo links keep working.
+    """
     if not user_id:
         return DATA_DIR
     safe_user_id = "".join(char for char in str(user_id) if char.isalnum() or char in {"_", "-"})
-    return USERS_DIR / safe_user_id
+    new_dir = DATA_DIR / safe_user_id
+    old_dir = USERS_DIR / safe_user_id
+    if old_dir.exists() and not new_dir.exists():
+        return old_dir
+    return new_dir
 
 
 def get_user_files(user_id=None):
-    """Return JSON file paths for one temporary user."""
+    """Return JSON file paths for one user."""
     base_dir = get_user_dir(user_id)
+    state_file = base_dir / "state.json"
+    legacy_state_file = base_dir / "current_state.json"
+    if legacy_state_file.exists() and not state_file.exists():
+        state_file = legacy_state_file
     return {
         "plan": base_dir / "plan.json",
         "transactions": base_dir / "transactions.json",
-        "current_state": base_dir / "current_state.json",
+        "current_state": state_file,
     }
 
 
@@ -289,3 +301,4 @@ def save_current_state(state, user_id=None):
     files = get_user_files(user_id)
     write_json(files["current_state"], state or {})
     return state or {}
+
