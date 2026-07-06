@@ -29,6 +29,68 @@ QUESTION_FLOW = [
     {"key": "cash_flow", "title": "是否影响现金流？", "type": "radio", "options": ["不会", "可能会", "会"]},
     {"key": "can_accept_loss", "title": "是否接受继续下跌 10%？", "type": "radio", "options": ["能接受", "不能接受"]},
 ]
+
+
+def inject_design_tokens():
+    """Inject theme-aware tokens for custom HTML blocks."""
+    st.markdown(
+        """
+        <style>
+        :root {
+            --bg: var(--background-color);
+            --text: var(--text-color);
+            --card: var(--secondary-background-color);
+            --border: color-mix(in srgb, var(--text) 20%, transparent);
+            --muted: color-mix(in srgb, var(--text) 62%, transparent);
+            --subtle: color-mix(in srgb, var(--text) 12%, transparent);
+            --shadow: none;
+        }
+        .bf-section-title {
+            margin: 0.75rem 0 0.2rem 0;
+            font-size: 1.35rem;
+            font-weight: 720;
+            color: var(--text);
+        }
+        .bf-section-subtitle {
+            margin: 0 0 1.4rem 0;
+            color: var(--muted);
+            line-height: 1.7;
+        }
+        .bf-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1.05rem 1.15rem;
+            margin: 0 0 1.15rem 0;
+            box-shadow: var(--shadow);
+        }
+        .bf-step-title {
+            font-size: 1.05rem;
+            font-weight: 700;
+            color: var(--text);
+            margin-bottom: 0.75rem;
+        }
+        .bf-label {
+            font-size: 0.78rem;
+            font-weight: 650;
+            color: var(--muted);
+            margin: 0.7rem 0 0.22rem 0;
+        }
+        .bf-body {
+            color: var(--text);
+            line-height: 1.85;
+            margin: 0;
+        }
+        .bf-rule {
+            height: 1px;
+            background: var(--subtle);
+            margin: 0.75rem 0;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
 def normalize_user_id(value):
     """Keep a temporary user id URL-safe and simple."""
     if isinstance(value, list):
@@ -342,59 +404,7 @@ def show_behavior_chain(diagnosis):
 
     st.markdown(
         """
-        <style>
-        :root {
-            --bf-card-bg: var(--secondary-background-color, #ffffff);
-            --bf-card-border: rgba(128, 128, 128, 0.24);
-            --bf-title: var(--text-color, #111827);
-            --bf-body: var(--text-color, #374151);
-            --bf-muted: rgba(128, 128, 128, 0.95);
-            --bf-label: rgba(128, 128, 128, 0.95);
-            --bf-rule: rgba(128, 128, 128, 0.18);
-            --bf-shadow: 0 1px 2px rgba(15, 23, 42, 0.025);
-        }
-        .bf-section-title {
-            margin: 0.75rem 0 0.2rem 0;
-            font-size: 1.35rem;
-            font-weight: 720;
-            color: var(--bf-title);
-        }
-        .bf-section-subtitle {
-            margin: 0 0 1.4rem 0;
-            color: var(--bf-muted);
-            line-height: 1.7;
-        }
-        .bf-card {
-            background: var(--bf-card-bg);
-            border: 1px solid var(--bf-card-border);
-            border-radius: 8px;
-            padding: 1.05rem 1.15rem;
-            margin: 0 0 1.15rem 0;
-            box-shadow: var(--bf-shadow);
-        }
-        .bf-step-title {
-            font-size: 1.05rem;
-            font-weight: 700;
-            color: var(--bf-title);
-            margin-bottom: 0.75rem;
-        }
-        .bf-label {
-            font-size: 0.78rem;
-            font-weight: 650;
-            color: var(--bf-label);
-            margin: 0.7rem 0 0.22rem 0;
-        }
-        .bf-body {
-            color: var(--bf-body);
-            line-height: 1.85;
-            margin: 0;
-        }
-        .bf-rule {
-            height: 1px;
-            background: var(--bf-rule);
-            margin: 0.75rem 0;
-        }
-        </style>
+
         <div class="bf-section-title">行为金融解释</div>
         <div class="bf-section-subtitle">以单列时间线还原一次投资操作的心理过程：先看到什么，再如何解释，最后回到纪律边界。</div>
         """,
@@ -433,6 +443,7 @@ def show_behavior_chain(diagnosis):
         for paragraph in paragraphs:
             st.write(paragraph)
         st.divider()
+
 def show_diagnosis_report(diagnosis):
     """Display the educational behavior finance report."""
     if not diagnosis:
@@ -611,6 +622,8 @@ def initialize_state():
     st.session_state.setdefault("step_index", 0)
     st.session_state.setdefault("diagnosis_record_key", "")
 
+
+inject_design_tokens()
 
 user_id = get_or_create_user_id()
 ensure_data_files(user_id)
@@ -951,6 +964,10 @@ with personality_tab:
             for item in profile.get("suggestions", []):
                 st.write(f"- {item}")
         st.caption("以上内容仅用于行为优化和心理建模，不构成任何买入、卖出、加仓或减仓建议。")
+
+
+
+
 
 
 
