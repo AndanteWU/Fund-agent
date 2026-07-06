@@ -7,7 +7,17 @@ from uuid import uuid4
 import streamlit as st
 
 from agent_logic import generate_conversation_check, generate_operation_check
-from data_manager import add_transaction, ensure_data_files, load_plans, load_transactions, save_plan
+from data_manager import (
+    add_plan,
+    add_transaction,
+    create_sample_plans,
+    ensure_data_files,
+    get_selected_plan as load_selected_plan,
+    load_plans,
+    load_transactions,
+    set_selected_plan,
+    update_plan,
+)
 from llm_analyzer import analyze_operation_reason
 
 
@@ -230,13 +240,11 @@ def build_personality_suggestions(scores, evidence):
 
 
 def get_selected_plan(plans):
-    """Return selected plan from session state."""
-    selected = st.session_state.get("selected_fund_plan")
-    if selected and any(plan.get("id") == selected.get("id") for plan in plans):
+    """Return selected plan from persisted user data."""
+    selected = load_selected_plan(st.session_state.user_id)
+    if selected:
+        st.session_state.selected_fund_plan = selected
         return selected
-    if plans:
-        st.session_state.selected_fund_plan = plans[0]
-        return plans[0]
     st.session_state.selected_fund_plan = {}
     return {}
 
@@ -245,11 +253,11 @@ def filter_history_for_plan(records, plan):
     """Filter operation history for current selected plan."""
     if not plan:
         return []
-    plan_id = plan.get("id")
+    plan_id = plan.get("plan_id") or plan.get("id")
     fund_name = plan.get("fund_name")
     return [
         item for item in records
-        if item.get("plan_id") == plan_id or item.get("fund_name") == fund_name
+        if item.get("plan_id") == plan_id or (not item.get("plan_id") and item.get("fund_name") == fund_name)
     ]
 
 
@@ -572,61 +580,110 @@ with plan_tab:
         with st.container(border=True):
             st.subheader("已保存计划")
             if not plans:
-                st.info("还没有保存定投计划。")
+                st.info("当前还没有定投计划，请先新增一个基金计划。")
+                if st.button("加载示例数据", use_container_width=True):
+                    create_sample_plans(st.session_state.user_id)
+                    reset_operation_flow()
+                    st.rerun()
             else:
                 for index, plan in enumerate(plans, start=1):
+                    plan_id = plan.get("plan_id") or plan.get("id")
                     label = plan.get("fund_name") or f"未命名基金 {index}"
-                    if selected_plan.get("id") == plan.get("id"):
+                    if selected_plan.get("plan_id") == plan_id:
                         label = "当前：" + label
-                    if st.button(label, key=f"select_plan_{plan.get('id')}", use_container_width=True):
-                        st.session_state.selected_fund_plan = plan
-                        selected_plan = plan
+                    if st.button(label, key=f"select_plan_{plan_id}", use_container_width=True):
+                        selected = set_selected_plan(st.session_state.user_id, plan_id)
+                        st.session_state.selected_fund_plan = selected
                         reset_operation_flow()
                         st.rerun()
-                    st.caption(f"每月 {format_money(plan.get('monthly_amount', 0))} | {plan.get('monthly_day', 1)} 日 | 回撤 {plan.get('max_drawdown') or '未填写'}")
+                    st.caption(
+                        f"每月 {format_money(plan.get('monthly_amount', 0))} | "
+                        f"{plan.get('dca_day') or plan.get('monthly_day', 1)} 日 | "
+                        f"回撤 {plan.get('max_drawdown') or '未填写'}"
+                    )
                     st.divider()
 
-            if st.button("新建基金计划", use_container_width=True):
-                st.session_state.selected_fund_plan = {}
-                selected_plan = {}
-                st.rerun()
+                if st.button("加载示例数据", use_container_width=True, help="仅在没有计划时会写入示例数据。"):
+                    if plans:
+                        st.info("当前已有计划，不会重复加载示例数据。")
+                    else:
+                        create_sample_plans(st.session_state.user_id)
+                        reset_operation_flow()
+                        st.rerun()
 
     with form_col:
         editing_plan = selected_plan or {}
         with st.container(border=True):
             st.subheader("新增或更新计划")
+            st.caption("新增会创建一条新的基金计划；更新只会修改当前选中的基金计划。")
             with st.form("plan_form"):
                 col1, col2, col3 = st.columns([2, 1, 1])
                 with col1:
                     fund_name = st.text_input("基金名称", value=editing_plan.get("fund_name", ""))
                 with col2:
-                    monthly_amount = st.number_input("每月定投金额", min_value=0.0, step=100.0, value=float(editing_plan.get("monthly_amount", 0) or 0))
+                    monthly_amount = st.number_input(
+                        "每月定投金额",
+                        min_value=0.0,
+                        step=100.0,
+                        value=float(editing_plan.get("monthly_amount", 0) or 0),
+                    )
                 with col3:
-                    monthly_day = st.number_input("定投日期", min_value=1, max_value=28, step=1, value=int(editing_plan.get("monthly_day", 1) or 1))
-                investment_goal = st.text_area("投资目标", value=editing_plan.get("investment_goal", ""))
+                    monthly_day = st.number_input(
+                        "定投日期",
+                        min_value=1,
+                        max_value=28,
+                        step=1,
+                        value=int(editing_plan.get("dca_day", editing_plan.get("monthly_day", 1)) or 1),
+                    )
+                investment_goal = st.text_area("投资目标", value=editing_plan.get("goal", editing_plan.get("investment_goal", "")))
                 max_drawdown = st.text_input("最大可接受回撤", value=editing_plan.get("max_drawdown", ""), placeholder="例如：20%")
-                save_plan_button = st.form_submit_button("保存定投计划", use_container_width=True)
+                add_col, update_col = st.columns(2)
+                with add_col:
+                    add_plan_button = st.form_submit_button("新增基金计划", use_container_width=True)
+                with update_col:
+                    update_plan_button = st.form_submit_button(
+                        "更新当前计划",
+                        use_container_width=True,
+                        disabled=not bool(selected_plan),
+                    )
 
-            if save_plan_button:
-                plan = {
-                    "id": editing_plan.get("id"),
-                    "fund_name": fund_name,
-                    "monthly_amount": monthly_amount,
-                    "monthly_day": monthly_day,
-                    "investment_goal": investment_goal,
-                    "max_drawdown": max_drawdown,
-                    "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                }
-                saved_plan = save_plan(plan, st.session_state.user_id)
-                st.session_state.selected_fund_plan = saved_plan
-                st.success("定投计划已保存。")
-                st.rerun()
+            plan_payload = {
+                "fund_name": fund_name.strip(),
+                "monthly_amount": monthly_amount,
+                "dca_day": monthly_day,
+                "goal": investment_goal,
+                "max_drawdown": max_drawdown,
+                "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            }
 
+            if add_plan_button:
+                if not plan_payload["fund_name"]:
+                    st.warning("请先填写基金名称。")
+                else:
+                    plan_payload["created_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    saved_plan = add_plan(st.session_state.user_id, plan_payload)
+                    st.session_state.selected_fund_plan = saved_plan
+                    reset_operation_flow()
+                    st.success("已新增基金计划，并切换为当前计划。")
+                    st.rerun()
+
+            if update_plan_button:
+                selected_plan_id = selected_plan.get("plan_id") or selected_plan.get("id")
+                if not selected_plan_id:
+                    st.warning("请先选择要更新的基金计划。")
+                elif not plan_payload["fund_name"]:
+                    st.warning("请先填写基金名称。")
+                else:
+                    saved_plan = update_plan(st.session_state.user_id, selected_plan_id, plan_payload)
+                    st.session_state.selected_fund_plan = saved_plan
+                    reset_operation_flow()
+                    st.success("当前基金计划已更新。")
+                    st.rerun()
 
 with operation_tab:
     st.header("操作检查")
     if not selected_plan:
-        st.info("请先在“定投计划”中选择或新增一个基金计划。")
+        st.info("当前还没有定投计划，请先新增一个基金计划。")
     else:
         st.caption(f"当前基金：{selected_plan.get('fund_name', '未填写基金名称')}")
 
@@ -658,7 +715,7 @@ with operation_tab:
 
                 if save_button:
                     st.session_state.current_operation = {
-                        "plan_id": selected_plan.get("id"),
+                        "plan_id": selected_plan.get("plan_id") or selected_plan.get("id"),
                         "fund_name": selected_plan.get("fund_name"),
                         "operation_date": operation_date.strftime("%Y-%m-%d"),
                         "operation_type": operation_type,
@@ -750,7 +807,7 @@ with history_tab:
     st.header("历史记录")
     records = filter_history_for_plan(sync_operation_history(), selected_plan)
     if not selected_plan:
-        st.info("请先选择基金计划。")
+        st.info("当前还没有定投计划，请先新增一个基金计划。")
     elif not records:
         st.info("当前基金暂无历史记录。")
     else:
@@ -774,9 +831,12 @@ with history_tab:
 with personality_tab:
     st.header("投资人格分析（Investment Personality）")
     st.caption("这是投资行为的长期心理画像系统，不预测市场，不提供投资建议，只做行为分析、心理建模和历史归因。")
+    st.caption("当前人格画像基于当前临时用户的全部历史操作记录，不限当前选中的基金计划。")
 
     all_records = sync_operation_history()
-    if not all_records:
+    if not plans:
+        st.info("当前还没有定投计划，请先新增一个基金计划。")
+    elif not all_records:
         st.info("还没有历史操作记录。完成几次操作检查后，这里会生成长期投资人格画像。")
     else:
         profile = build_investment_personality(all_records)
@@ -825,6 +885,10 @@ with personality_tab:
             for item in profile.get("suggestions", []):
                 st.write(f"- {item}")
         st.caption("以上内容仅用于行为优化和心理建模，不构成任何买入、卖出、加仓或减仓建议。")
+
+
+
+
 
 
 

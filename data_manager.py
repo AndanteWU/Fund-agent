@@ -1,7 +1,6 @@
 """Simple JSON storage helpers for the Fund DCA Decision Support Agent."""
 
 import json
-import shutil
 from pathlib import Path
 from uuid import uuid4
 
@@ -13,17 +12,17 @@ TRANSACTIONS_FILE = DATA_DIR / "transactions.json"
 CURRENT_STATE_FILE = DATA_DIR / "current_state.json"
 
 
-DEFAULT_PLAN = []
 DEFAULT_TRANSACTIONS = []
+
+
+def default_plan_data():
+    """Return an empty multi-plan structure for a new temporary user."""
+    return {"plans": [], "selected_plan_id": None}
 
 
 def default_current_state():
     """Return the default latest-state structure for the behavior loop."""
-    return {
-        "latest_operation": {},
-        "qa_answers": {},
-        "behavior_diagnosis": {},
-    }
+    return {}
 
 
 def get_user_dir(user_id=None):
@@ -60,102 +59,207 @@ def write_json(file_path, data):
         json.dump(data, file, ensure_ascii=False, indent=2)
 
 
-def copy_or_create_file(source_path, target_path, default_value):
-    """Copy demo data when available, otherwise create a default JSON file."""
-    target_path.parent.mkdir(parents=True, exist_ok=True)
-    if target_path.exists():
-        return
-    if source_path.exists():
-        shutil.copyfile(source_path, target_path)
-    else:
-        write_json(target_path, default_value)
-
-
 def ensure_data_files(user_id=None):
-    """Create default JSON files for global data or one temporary user."""
+    """Create empty JSON files for global data or one temporary user."""
     DATA_DIR.mkdir(exist_ok=True)
+    files = get_user_files(user_id)
 
-    if user_id:
-        files = get_user_files(user_id)
-        copy_or_create_file(PLAN_FILE, files["plan"], DEFAULT_PLAN)
-        copy_or_create_file(TRANSACTIONS_FILE, files["transactions"], DEFAULT_TRANSACTIONS)
-        copy_or_create_file(CURRENT_STATE_FILE, files["current_state"], default_current_state())
-        return
+    if not files["plan"].exists():
+        write_json(files["plan"], default_plan_data())
+    if not files["transactions"].exists():
+        write_json(files["transactions"], DEFAULT_TRANSACTIONS)
+    if not files["current_state"].exists():
+        write_json(files["current_state"], default_current_state())
 
-    if not PLAN_FILE.exists():
-        write_json(PLAN_FILE, DEFAULT_PLAN)
-    if not TRANSACTIONS_FILE.exists():
-        write_json(TRANSACTIONS_FILE, DEFAULT_TRANSACTIONS)
-    if not CURRENT_STATE_FILE.exists():
-        write_json(CURRENT_STATE_FILE, default_current_state())
+
+def make_plan_id():
+    """Create a short readable plan id."""
+    return f"plan_{uuid4().hex[:6]}"
 
 
 def normalize_plan(plan):
-    """Make sure one plan has the fields needed by the app."""
-    normalized = dict(plan)
-    if not normalized.get("id"):
-        normalized["id"] = uuid4().hex
+    """Normalize one plan and keep old field aliases readable."""
+    source = dict(plan or {})
+    plan_id = source.get("plan_id") or source.get("id") or make_plan_id()
+    dca_day = source.get("dca_day", source.get("monthly_day", 1))
+    goal = source.get("goal", source.get("investment_goal", ""))
+
+    try:
+        dca_day = int(dca_day or 1)
+    except (TypeError, ValueError):
+        dca_day = 1
+    dca_day = max(1, min(28, dca_day))
+
+    normalized = {
+        "plan_id": plan_id,
+        "id": plan_id,
+        "fund_name": source.get("fund_name", ""),
+        "monthly_amount": float(source.get("monthly_amount", 0) or 0),
+        "dca_day": dca_day,
+        "monthly_day": dca_day,
+        "goal": goal,
+        "investment_goal": goal,
+        "max_drawdown": source.get("max_drawdown", ""),
+    }
+
+    if source.get("created_at"):
+        normalized["created_at"] = source.get("created_at")
+    if source.get("updated_at"):
+        normalized["updated_at"] = source.get("updated_at")
+    return normalized
+
+
+def normalize_plan_data(data):
+    """Normalize old single/list plan formats into the new multi-plan structure."""
+    if isinstance(data, dict) and isinstance(data.get("plans"), list):
+        raw_plans = data.get("plans", [])
+        selected_plan_id = data.get("selected_plan_id")
+    elif isinstance(data, list):
+        raw_plans = data
+        selected_plan_id = None
+    elif isinstance(data, dict) and data.get("fund_name"):
+        raw_plans = [data]
+        selected_plan_id = data.get("plan_id") or data.get("id")
+    else:
+        raw_plans = []
+        selected_plan_id = None
+
+    plans = [normalize_plan(item) for item in raw_plans if isinstance(item, dict)]
+    valid_ids = {plan.get("plan_id") for plan in plans}
+    if selected_plan_id not in valid_ids:
+        selected_plan_id = plans[0].get("plan_id") if plans else None
+
+    return {"plans": plans, "selected_plan_id": selected_plan_id}
+
+
+def load_plan_data(user_id=None):
+    """Load the full multi-plan JSON data for one temporary user."""
+    ensure_data_files(user_id)
+    files = get_user_files(user_id)
+    data = normalize_plan_data(read_json(files["plan"], default_plan_data()))
+    write_json(files["plan"], data)
+    return data
+
+
+def save_plan_data(user_id, data):
+    """Save the full multi-plan JSON data for one temporary user."""
+    normalized = normalize_plan_data(data)
+    files = get_user_files(user_id)
+    write_json(files["plan"], normalized)
     return normalized
 
 
 def load_plans(user_id=None):
     """Load all saved investment plans for one temporary user."""
-    ensure_data_files(user_id)
-    files = get_user_files(user_id)
-    data = read_json(files["plan"], [])
+    return load_plan_data(user_id).get("plans", [])
 
+
+def save_plans(user_id, data):
+    """Save plan data. Accepts either the full dict or a plain plans list."""
     if isinstance(data, list):
-        plans = [normalize_plan(item) for item in data if isinstance(item, dict)]
-    elif isinstance(data, dict) and data.get("fund_name"):
-        plans = [normalize_plan(data)]
-    else:
-        plans = []
-
-    save_plans(plans, user_id)
-    return plans
+        current = load_plan_data(user_id)
+        data = {"plans": data, "selected_plan_id": current.get("selected_plan_id")}
+    return save_plan_data(user_id, data)
 
 
-def save_plans(plans, user_id=None):
-    """Save all investment plans for one temporary user."""
-    files = get_user_files(user_id)
-    write_json(files["plan"], [normalize_plan(plan) for plan in plans])
+def add_plan(user_id, plan):
+    """Append a new fund plan and select it."""
+    data = load_plan_data(user_id)
+    new_plan = normalize_plan({**dict(plan or {}), "plan_id": make_plan_id()})
+    data["plans"].append(new_plan)
+    data["selected_plan_id"] = new_plan.get("plan_id")
+    save_plan_data(user_id, data)
+    return new_plan
+
+
+def update_plan(user_id, plan_id, updated_plan):
+    """Update only the selected plan, leaving other plans untouched."""
+    data = load_plan_data(user_id)
+    for index, existing_plan in enumerate(data.get("plans", [])):
+        if existing_plan.get("plan_id") == plan_id:
+            merged = {**existing_plan, **dict(updated_plan or {}), "plan_id": plan_id, "id": plan_id}
+            data["plans"][index] = normalize_plan(merged)
+            data["selected_plan_id"] = plan_id
+            save_plan_data(user_id, data)
+            return data["plans"][index]
+    return {}
+
+
+def set_selected_plan(user_id, plan_id):
+    """Select one existing plan by plan_id."""
+    data = load_plan_data(user_id)
+    if any(plan.get("plan_id") == plan_id for plan in data.get("plans", [])):
+        data["selected_plan_id"] = plan_id
+        save_plan_data(user_id, data)
+    return get_selected_plan(user_id)
+
+
+def get_selected_plan(user_id=None):
+    """Return the currently selected plan for one temporary user."""
+    data = load_plan_data(user_id)
+    selected_plan_id = data.get("selected_plan_id")
+    for plan in data.get("plans", []):
+        if plan.get("plan_id") == selected_plan_id:
+            return plan
+    return {}
+
+
+def create_sample_plans(user_id=None):
+    """Load demo plans only when the user explicitly asks for examples."""
+    data = load_plan_data(user_id)
+    if data.get("plans"):
+        return data
+
+    sample_plans = [
+        normalize_plan({
+            "plan_id": make_plan_id(),
+            "fund_name": "易方达全球成长精选混合 QDII A",
+            "monthly_amount": 500,
+            "dca_day": 15,
+            "goal": "长期持有三年以上，作为海外资产配置的一部分",
+            "max_drawdown": "20%",
+        }),
+        normalize_plan({
+            "plan_id": make_plan_id(),
+            "fund_name": "易方达全球成长精选混合 QDII C",
+            "monthly_amount": 800,
+            "dca_day": 20,
+            "goal": "长期持有三年以上，作为海外资产配置的一部分",
+            "max_drawdown": "20%",
+        }),
+    ]
+    data = {"plans": sample_plans, "selected_plan_id": sample_plans[0].get("plan_id")}
+    save_plan_data(user_id, data)
+    return data
 
 
 def load_plan(user_id=None):
-    """Load the first saved plan for backward compatibility."""
-    plans = load_plans(user_id)
-    return plans[0] if plans else {}
+    """Load the selected saved plan for backward compatibility."""
+    return get_selected_plan(user_id)
 
 
 def get_plan_by_id(plan_id, user_id=None):
     """Find one plan by id."""
     for plan in load_plans(user_id):
-        if plan.get("id") == plan_id:
+        if plan.get("plan_id") == plan_id or plan.get("id") == plan_id:
             return plan
     return {}
 
 
 def save_plan(plan, user_id=None):
-    """Create or update one investment plan for one temporary user."""
-    plan = normalize_plan(plan)
-    plans = load_plans(user_id)
-
-    for index, existing_plan in enumerate(plans):
-        if existing_plan.get("id") == plan.get("id"):
-            plans[index] = plan
-            save_plans(plans, user_id)
-            return plan
-
-    plans.append(plan)
-    save_plans(plans, user_id)
-    return plan
+    """Create or update one investment plan for backward compatibility."""
+    plan_id = (plan or {}).get("plan_id") or (plan or {}).get("id")
+    if plan_id and get_plan_by_id(plan_id, user_id):
+        return update_plan(user_id, plan_id, plan)
+    return add_plan(user_id, plan)
 
 
 def load_transactions(user_id=None):
     """Load all saved transaction records for one temporary user."""
     ensure_data_files(user_id)
     files = get_user_files(user_id)
-    return read_json(files["transactions"], [])
+    transactions = read_json(files["transactions"], [])
+    return transactions if isinstance(transactions, list) else []
 
 
 def save_transactions(transactions, user_id=None):
@@ -177,18 +281,11 @@ def load_current_state(user_id=None):
     ensure_data_files(user_id)
     files = get_user_files(user_id)
     state = read_json(files["current_state"], default_current_state())
-    if not isinstance(state, dict):
-        return default_current_state()
-
-    default_state = default_current_state()
-    default_state.update(state)
-    return default_state
+    return state if isinstance(state, dict) else default_current_state()
 
 
 def save_current_state(state, user_id=None):
     """Save the latest behavior decision loop state, overwriting old state."""
-    default_state = default_current_state()
-    default_state.update(state or {})
     files = get_user_files(user_id)
-    write_json(files["current_state"], default_state)
-    return default_state
+    write_json(files["current_state"], state or {})
+    return state or {}
