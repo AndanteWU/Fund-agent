@@ -344,26 +344,14 @@ def show_behavior_chain(diagnosis):
         """
         <style>
         :root {
-            --bf-card-bg: #ffffff;
-            --bf-card-border: #e5e7eb;
-            --bf-title: #111827;
-            --bf-body: #374151;
-            --bf-muted: #6b7280;
-            --bf-label: #6b7280;
-            --bf-rule: #f1f5f9;
+            --bf-card-bg: var(--secondary-background-color, #ffffff);
+            --bf-card-border: rgba(128, 128, 128, 0.24);
+            --bf-title: var(--text-color, #111827);
+            --bf-body: var(--text-color, #374151);
+            --bf-muted: rgba(128, 128, 128, 0.95);
+            --bf-label: rgba(128, 128, 128, 0.95);
+            --bf-rule: rgba(128, 128, 128, 0.18);
             --bf-shadow: 0 1px 2px rgba(15, 23, 42, 0.025);
-        }
-        @media (prefers-color-scheme: dark) {
-            :root {
-                --bf-card-bg: #111827;
-                --bf-card-border: #2b3442;
-                --bf-title: #f3f4f6;
-                --bf-body: #d1d5db;
-                --bf-muted: #9ca3af;
-                --bf-label: #aeb7c4;
-                --bf-rule: #263241;
-                --bf-shadow: none;
-            }
         }
         .bf-section-title {
             margin: 0.75rem 0 0.2rem 0;
@@ -963,6 +951,7 @@ with personality_tab:
             for item in profile.get("suggestions", []):
                 st.write(f"- {item}")
         st.caption("以上内容仅用于行为优化和心理建模，不构成任何买入、卖出、加仓或减仓建议。")
+
 
 
 
