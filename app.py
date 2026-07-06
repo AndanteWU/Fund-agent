@@ -299,43 +299,58 @@ def get_flow_statuses(operation_stage):
     return statuses
 
 def show_behavior_chain(diagnosis):
-    """Show a visual investment decision psychology chain."""
+    """Show a cleaner vertical behavior-finance timeline."""
     chain = [
         item for item in (diagnosis.get("decision_chain") or [])
         if "纪律校验" not in str(item.get("stage", ""))
     ]
     if not chain:
         chain = [
-            {"stage": "触发信号", "signal": "操作想法出现", "psychology": "短期价格、账户盈亏或外部信息进入注意力", "discipline_check": "先确认这是否属于原定计划"},
-            {"stage": "注意力聚焦", "signal": "近期波动被放大", "psychology": "可得性偏差让最近看到的信息显得更重要", "discipline_check": "区分事实、情绪和他人观点"},
-            {"stage": "参照点形成", "signal": "以成本、高点或计划金额作比较", "psychology": "锚定效应可能影响对风险的判断", "discipline_check": "检查当前金额是否仍在预算内"},
-            {"stage": "情绪反应", "signal": "后悔、焦虑或怕错过", "psychology": "损失厌恶和自豪/悔恨会推动补救冲动", "discipline_check": "确认继续下跌10%时是否能接受"},
+            {"stage": "触发信号", "signal": "操作想法出现", "psychology": "短期价格、账户盈亏或外部信息进入注意力。", "discipline_check": "先确认这是否属于原定计划。"},
+            {"stage": "注意力聚焦", "signal": "近期波动被放大", "psychology": "可得性偏差让最近看到的信息显得更重要。", "discipline_check": "区分事实、情绪和他人观点。"},
+            {"stage": "参照点形成", "signal": "以成本、高点或计划金额作比较", "psychology": "锚定效应可能影响对风险的判断。", "discipline_check": "检查当前金额是否仍在预算内。"},
+            {"stage": "情绪反应", "signal": "后悔、焦虑或怕错过", "psychology": "损失厌恶和自豪/悔恨会推动补救冲动。", "discipline_check": "确认继续下跌 10% 时是否能接受。"},
         ]
 
-    st.caption("这条链路不是市场预测，而是把一次操作拆成：信息进入注意力、心理解释、操作冲动和纪律校验。")
+    st.markdown(
+        """
+        <div style="margin:10px 0 18px 0;">
+            <div style="font-size:22px;font-weight:720;color:#111827;margin-bottom:4px;">行为金融解释</div>
+            <div style="color:#6b7280;line-height:1.7;">把一次操作拆成一条心理链条：信号出现、心理加工、纪律回看。它不判断市场，只帮助你看清决策是怎样形成的。</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
     for index, item in enumerate(chain, start=1):
         stage = escape(str(item.get("stage", f"阶段 {index}")))
         signal = escape(str(item.get("signal", "暂无触发信号")))
-        psychology = escape(str(item.get("psychology", "暂无心理机制")))
+        psychology = escape(str(item.get("psychology", "暂无心理解释")))
         check = escape(str(item.get("discipline_check", "回到计划、现金流和风险承受边界")))
+        line_html = "" if index == len(chain) else '<div style="width:1px;background:#e5e7eb;flex:1;margin-top:10px;"></div>'
         st.markdown(
             f"""
-            <div style="display:flex;gap:14px;margin:0 0 12px 0;align-items:stretch;">
-                <div style="width:38px;height:38px;border-radius:999px;background:#2563eb;color:white;display:flex;align-items:center;justify-content:center;font-weight:700;flex:0 0 auto;margin-top:8px;">{index}</div>
-                <div style="border:1px solid #d8dee9;border-radius:8px;background:#f8fafc;padding:14px 16px;flex:1;">
-                    <div style="font-size:18px;font-weight:700;color:#1f2937;margin-bottom:10px;">{stage}</div>
-                    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
-                        <div style="background:white;border-radius:6px;padding:10px 12px;border-left:3px solid #60a5fa;">
-                            <div style="font-size:12px;color:#64748b;margin-bottom:4px;">触发信号</div>
-                            <div style="line-height:1.6;color:#334155;">{signal}</div>
+            <div style="display:flex;gap:14px;margin:0 0 14px 0;align-items:stretch;">
+                <div style="width:28px;display:flex;flex-direction:column;align-items:center;flex:0 0 auto;">
+                    <div style="width:28px;height:28px;border-radius:999px;background:#f3f4f6;color:#374151;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;border:1px solid #e5e7eb;">{index}</div>
+                    {line_html}
+                </div>
+                <div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:10px;padding:16px 18px;flex:1;box-shadow:0 1px 2px rgba(15,23,42,0.03);">
+                    <div style="font-size:17px;font-weight:700;color:#111827;margin-bottom:14px;">{stage}</div>
+                    <div style="display:flex;flex-direction:column;gap:12px;">
+                        <div>
+                            <div style="font-size:12px;color:#9ca3af;margin-bottom:4px;">触发信号</div>
+                            <div style="color:#374151;line-height:1.75;">{signal}</div>
                         </div>
-                        <div style="background:white;border-radius:6px;padding:10px 12px;border-left:3px solid #f59e0b;">
-                            <div style="font-size:12px;color:#64748b;margin-bottom:4px;">心理解释</div>
-                            <div style="line-height:1.6;color:#334155;">{psychology}</div>
+                        <div style="height:1px;background:#f1f5f9;"></div>
+                        <div>
+                            <div style="font-size:12px;color:#9ca3af;margin-bottom:4px;">心理解释</div>
+                            <div style="color:#374151;line-height:1.75;">{psychology}</div>
                         </div>
-                        <div style="background:white;border-radius:6px;padding:10px 12px;border-left:3px solid #22c55e;">
-                            <div style="font-size:12px;color:#64748b;margin-bottom:4px;">纪律校验</div>
-                            <div style="line-height:1.6;color:#334155;">{check}</div>
+                        <div style="height:1px;background:#f1f5f9;"></div>
+                        <div>
+                            <div style="font-size:12px;color:#9ca3af;margin-bottom:4px;">纪律校验</div>
+                            <div style="color:#374151;line-height:1.75;">{check}</div>
                         </div>
                     </div>
                 </div>
@@ -344,17 +359,37 @@ def show_behavior_chain(diagnosis):
             unsafe_allow_html=True,
         )
 
-    explanation = escape(diagnosis.get("behavioral_explanation") or "暂无行为金融解释。")
+    raw_explanation = diagnosis.get("behavioral_explanation") or "暂无综合解读。"
+    sentences = []
+    for part in str(raw_explanation).replace("；", "。").replace(";", "。").split("。"):
+        cleaned = part.strip()
+        if cleaned:
+            sentences.append(cleaned + "。")
+    summary_rows = [
+        ("核心机制", "".join(sentences[:2]) or str(raw_explanation)),
+        ("行为风险", "".join(sentences[2:4]) or "重点观察短期波动、他人信息或账户盈亏是否正在放大操作冲动。"),
+        ("纪律回看", "".join(sentences[4:]) or "回到原定计划、现金流安全、风险承受和操作理由四个边界。"),
+    ]
+
+    rows_html = ""
+    for label, content in summary_rows:
+        rows_html += f"""
+        <div style="padding:12px 0;border-top:1px solid #eef2f7;">
+            <div style="font-size:12px;color:#9ca3af;margin-bottom:5px;">{escape(label)}</div>
+            <div style="line-height:1.85;color:#374151;">{escape(content)}</div>
+        </div>
+        """
+
     st.markdown(
         f"""
-        <div style="margin-top:16px;border-left:4px solid #3b82f6;background:#eff6ff;border-radius:6px;padding:16px 18px 16px 22px;">
-            <div style="font-weight:700;color:#1e3a8a;margin-bottom:8px;">综合解读</div>
-            <div style="line-height:1.9;color:#1f2937;text-indent:2em;">{explanation}</div>
+        <div style="margin-top:20px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:10px;padding:16px 18px;">
+            <div style="font-size:17px;font-weight:700;color:#111827;margin-bottom:2px;">综合解读</div>
+            <div style="color:#6b7280;font-size:13px;margin-bottom:8px;">将上面的心理链条收束为三个观察点。</div>
+            {rows_html}
         </div>
         """,
         unsafe_allow_html=True,
     )
-
 def show_diagnosis_report(diagnosis):
     """Display the educational behavior finance report."""
     if not diagnosis:
@@ -384,7 +419,6 @@ def show_diagnosis_report(diagnosis):
         if diagnosis.get("improvement_suggestion"):
             st.caption(f"改进方向：{diagnosis.get('improvement_suggestion')}")
 
-    st.markdown("**一、行为金融解释：从一次操作看见一条心理链条**")
     show_behavior_chain(diagnosis)
 
     st.markdown("**二、情景推演**")
@@ -885,6 +919,7 @@ with personality_tab:
             for item in profile.get("suggestions", []):
                 st.write(f"- {item}")
         st.caption("以上内容仅用于行为优化和心理建模，不构成任何买入、卖出、加仓或减仓建议。")
+
 
 
 
