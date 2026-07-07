@@ -1,137 +1,13 @@
-"""Email verification login helpers for the Streamlit app."""
+"""Supabase Auth helpers for the Streamlit app."""
 
-import hashlib
 import os
-import re
-import secrets
-import smtplib
-import time
-from email.message import EmailMessage
-from uuid import uuid4
 
 import streamlit as st
 
-
-ALLOWED_DOMAINS = {"163.com", "126.com", "yeah.net", "gmail.com"}
-CODE_TTL_SECONDS = 5 * 60
-SEND_COOLDOWN_SECONDS = 60
-
-
-SMTP_CONFIG = {
-    "163.com": {
-        "host": "smtp.163.com",
-        "port": 465,
-        "user_env": "NETEASE_SMTP_USER",
-        "password_env": "NETEASE_SMTP_APP_PASSWORD",
-    },
-    "126.com": {
-        "host": "smtp.163.com",
-        "port": 465,
-        "user_env": "NETEASE_SMTP_USER",
-        "password_env": "NETEASE_SMTP_APP_PASSWORD",
-    },
-    "yeah.net": {
-        "host": "smtp.163.com",
-        "port": 465,
-        "user_env": "NETEASE_SMTP_USER",
-        "password_env": "NETEASE_SMTP_APP_PASSWORD",
-    },
-    "gmail.com": {
-        "host": "smtp.gmail.com",
-        "port": 465,
-        "user_env": "GMAIL_SMTP_USER",
-        "password_env": "GMAIL_SMTP_APP_PASSWORD",
-    },
-}
-
-
-EMAIL_PATTERN = re.compile(r"^[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+\.[A-Za-z]{2,})$")
-
-
-def normalize_email(email):
-    """Normalize an email address for login."""
-    return (email or "").strip().lower()
-
-
-def validate_email(email):
-    """Return (is_valid, message, domain)."""
-    email = normalize_email(email)
-    match = EMAIL_PATTERN.match(email)
-    if not match:
-        return False, "请输入有效的邮箱地址。", ""
-
-    domain = email.split("@")[-1]
-    if domain not in ALLOWED_DOMAINS:
-        return False, "当前仅支持 163.com、126.com、yeah.net 和 gmail.com 邮箱。", domain
-
-    return True, "", domain
-
-
-def hash_code(code, salt):
-    """Hash verification code before saving it in session state."""
-    return hashlib.sha256(f"{salt}:{code}".encode("utf-8")).hexdigest()
-
-
-def generate_code():
-    """Generate a six-digit verification code."""
-    return f"{secrets.randbelow(1_000_000):06d}"
-
-
-def generate_user_id(email):
-    """Create a stable user id for one email address."""
-    normalized_email = normalize_email(email)
-    digest = hashlib.sha256(normalized_email.encode("utf-8")).hexdigest()[:12]
-    return f"user_{digest}"
-
-
-def get_smtp_settings(domain):
-    """Read SMTP settings from environment variables."""
-    config = SMTP_CONFIG[domain]
-    sender = os.getenv(config["user_env"], "").strip()
-    password = os.getenv(config["password_env"], "").strip()
-    if not sender or not password:
-        return None, (
-            f"SMTP 环境变量未配置完整：请设置 {config['user_env']} 和 "
-            f"{config['password_env']}。"
-        )
-
-    return {
-        "host": config["host"],
-        "port": config["port"],
-        "sender": sender,
-        "password": password,
-    }, ""
-
-
-def send_verification_email(email, code):
-    """Send the verification code by SMTP over SSL."""
-    is_valid, message, domain = validate_email(email)
-    if not is_valid:
-        return False, message
-
-    settings, error = get_smtp_settings(domain)
-    if error:
-        return False, error
-
-    msg = EmailMessage()
-    msg["Subject"] = "基金定投辅助决策 Agent 登录验证码"
-    msg["From"] = settings["sender"]
-    msg["To"] = email
-    msg.set_content(
-        "您好，\n\n"
-        f"您的登录验证码是：{code}\n"
-        "验证码 5 分钟内有效。若非本人操作，请忽略此邮件。\n\n"
-        "本系统不预测市场涨跌，也不提供买卖建议。"
-    )
-
-    try:
-        with smtplib.SMTP_SSL(settings["host"], settings["port"], timeout=20) as server:
-            server.login(settings["sender"], settings["password"])
-            server.send_message(msg)
-    except Exception as error:
-        return False, f"验证码发送失败：{error}"
-
-    return True, "验证码已发送，请查收邮箱。"
+try:
+    from supabase import create_client
+except ImportError:
+    create_client = None
 
 
 def init_auth_state():
@@ -139,135 +15,165 @@ def init_auth_state():
     st.session_state.setdefault("is_logged_in", False)
     st.session_state.setdefault("email", "")
     st.session_state.setdefault("user_id", "")
-    st.session_state.setdefault("auth_code_hash", "")
-    st.session_state.setdefault("auth_code_salt", "")
-    st.session_state.setdefault("auth_code_email", "")
-    st.session_state.setdefault("auth_code_expires_at", 0.0)
-    st.session_state.setdefault("auth_last_sent_at", 0.0)
+    st.session_state.setdefault("auth_mode", "")
+    st.session_state.setdefault("supabase_access_token", "")
+    st.session_state.setdefault("supabase_refresh_token", "")
+
+
+def get_supabase_config():
+    """Read Supabase project settings from environment variables."""
+    url = os.getenv("SUPABASE_URL", "").strip()
+    anon_key = os.getenv("SUPABASE_ANON_KEY", "").strip()
+    if not url or not anon_key:
+        return "", "", "请先配置 SUPABASE_URL 和 SUPABASE_ANON_KEY 环境变量。"
+    return url, anon_key, ""
+
+
+@st.cache_resource(show_spinner=False)
+def get_supabase_client(url, anon_key):
+    """Create one cached Supabase client for the Streamlit process."""
+    if create_client is None:
+        return None
+    return create_client(url, anon_key)
+
+
+def read_attr(value, name, default=""):
+    """Read a field from either an object or a dict returned by Supabase."""
+    if value is None:
+        return default
+    if isinstance(value, dict):
+        return value.get(name, default)
+    return getattr(value, name, default)
+
+
+def normalize_supabase_user(user):
+    """Convert Supabase user object into the app's auth shape."""
+    user_id = read_attr(user, "id", "")
+    email = read_attr(user, "email", "")
+    if not user_id:
+        return None
+    return {"user_id": str(user_id), "email": email or "", "provider": "supabase"}
+
+
+def save_supabase_session(session):
+    """Persist Supabase session fields inside Streamlit session_state."""
+    if not session:
+        return
+    st.session_state.supabase_access_token = read_attr(session, "access_token", "")
+    st.session_state.supabase_refresh_token = read_attr(session, "refresh_token", "")
+
 
 def get_supabase_user():
-    """Reserved integration point for future Supabase Auth.
-
-    Return a dict like {"user_id": "user_xxx", "email": "name@example.com"}
-    when Supabase is connected. Keeping this function here lets the app switch
-    auth providers without changing business pages.
-    """
+    """Return the current Supabase-authenticated user if available."""
+    init_auth_state()
+    if st.session_state.get("auth_mode") == "supabase" and st.session_state.get("user_id"):
+        return {
+            "user_id": st.session_state.user_id,
+            "email": st.session_state.get("email", ""),
+            "provider": "supabase",
+        }
     return None
 
 
 def get_authenticated_user():
-    """Return current authenticated user from session or future Supabase Auth."""
+    """Return the current authenticated Supabase user."""
     init_auth_state()
-    if st.session_state.get("is_logged_in") and st.session_state.get("user_id"):
-        return {
-            "user_id": st.session_state.get("user_id"),
-            "email": st.session_state.get("email", ""),
-            "provider": st.session_state.get("auth_mode", "email"),
-        }
-
-    supabase_user = get_supabase_user()
-    if supabase_user and supabase_user.get("user_id"):
-        st.session_state.is_logged_in = True
-        st.session_state.user_id = supabase_user["user_id"]
-        st.session_state.email = supabase_user.get("email", "")
-        st.session_state.auth_mode = "supabase"
-        return {
-            "user_id": st.session_state.user_id,
-            "email": st.session_state.email,
-            "provider": "supabase",
-        }
-
-    return None
-
+    return get_supabase_user()
 
 
 def render_login_page():
-    """Render email-code login and return True after login succeeds."""
+    """Render Supabase email/password login and return True after login succeeds."""
     init_auth_state()
-    if st.session_state.get("is_logged_in") and st.session_state.get("user_id"):
+    if get_authenticated_user():
         return True
 
     st.title("基金定投辅助决策 Agent")
-    st.caption("请使用邮箱验证码登录。当前支持网易邮箱和 Gmail。")
+    st.caption("请使用 Supabase Auth 账号登录。登录后系统会使用 Supabase user.id 隔离保存你的数据。")
+
+    url, anon_key, config_error = get_supabase_config()
+    if create_client is None:
+        st.error("当前环境未安装 supabase Python 包，请先安装依赖：pip install supabase")
+        return False
+    if config_error:
+        st.error(config_error)
+        return False
+
+    try:
+        supabase = get_supabase_client(url, anon_key)
+        catch_error = None
+    except Exception as error:
+        supabase = None
+        catch_error = error
+    if supabase is None:
+        if catch_error:
+            st.error(f"Supabase 客户端初始化失败：{catch_error}")
+        else:
+            st.error("Supabase 客户端初始化失败，请检查依赖和环境变量。")
+        return False
 
     with st.container(border=True):
-        email = normalize_email(st.text_input("邮箱地址", value=st.session_state.get("auth_code_email", ""), placeholder="name@gmail.com"))
-        send_col, status_col = st.columns([1, 2])
+        mode = st.radio("登录方式", ["登录", "注册"], horizontal=True)
+        email = st.text_input("邮箱", placeholder="name@example.com")
+        password = st.text_input("密码", type="password")
 
-        now = time.time()
-        cooldown_left = max(0, int(SEND_COOLDOWN_SECONDS - (now - st.session_state.auth_last_sent_at)))
-        send_disabled = cooldown_left > 0
+        if mode == "登录":
+            submit_label = "登录"
+            help_text = "使用 Supabase Auth 已注册账号登录。"
+        else:
+            submit_label = "注册并登录"
+            help_text = "如果 Supabase 项目开启邮箱确认，请先到邮箱完成确认后再登录。"
+        st.caption(help_text)
 
-        with send_col:
-            send_clicked = st.button(
-                "发送验证码" if not send_disabled else f"{cooldown_left} 秒后可重发",
-                disabled=send_disabled,
-                use_container_width=True,
-            )
+        if st.button(submit_label, type="primary", use_container_width=True):
+            if not email.strip() or not password:
+                st.warning("请填写邮箱和密码。")
+                return False
 
-        if send_clicked:
-            is_valid, message, _ = validate_email(email)
-            if not is_valid:
-                st.warning(message)
-            else:
-                code = generate_code()
-                salt = uuid4().hex
-                ok, send_message = send_verification_email(email, code)
-                if ok:
-                    st.session_state.auth_code_hash = hash_code(code, salt)
-                    st.session_state.auth_code_salt = salt
-                    st.session_state.auth_code_email = email
-                    st.session_state.auth_code_expires_at = time.time() + CODE_TTL_SECONDS
-                    st.session_state.auth_last_sent_at = time.time()
-                    st.success(send_message)
-                    st.rerun()
+            try:
+                if mode == "登录":
+                    response = supabase.auth.sign_in_with_password(
+                        {"email": email.strip(), "password": password}
+                    )
                 else:
-                    st.error(send_message)
+                    response = supabase.auth.sign_up(
+                        {"email": email.strip(), "password": password}
+                    )
 
-        with status_col:
-            st.caption("验证码 5 分钟有效；同一会话 60 秒内不能重复发送。")
+                user = read_attr(response, "user")
+                session = read_attr(response, "session")
+                if not session:
+                    st.warning("Supabase 没有返回登录会话。若刚注册账号，请先完成邮箱确认后再登录。")
+                    return False
 
-        code_input = st.text_input("验证码", max_chars=6, placeholder="请输入 6 位数字验证码")
-        verify_clicked = st.button("登录", type="primary", use_container_width=True)
+                normalized_user = normalize_supabase_user(user)
+                if not normalized_user:
+                    st.warning("Supabase 没有返回可用用户信息，请稍后重试。")
+                    return False
 
-        if verify_clicked:
-            if not st.session_state.auth_code_hash:
-                st.warning("请先发送验证码。")
-            elif normalize_email(email) != st.session_state.auth_code_email:
-                st.warning("当前邮箱与接收验证码的邮箱不一致。")
-            elif time.time() > st.session_state.auth_code_expires_at:
-                st.warning("验证码已过期，请重新发送。")
-            elif hash_code(code_input.strip(), st.session_state.auth_code_salt) != st.session_state.auth_code_hash:
-                st.warning("验证码不正确。")
-            else:
+                save_supabase_session(session)
                 st.session_state.is_logged_in = True
-                st.session_state.email = st.session_state.auth_code_email
-                st.session_state.user_id = generate_user_id(st.session_state.email)
-                st.session_state.auth_mode = "email"
-                st.session_state.auth_code_hash = ""
-                st.session_state.auth_code_salt = ""
+                st.session_state.user_id = normalized_user["user_id"]
+                st.session_state.email = normalized_user["email"]
+                st.session_state.auth_mode = "supabase"
                 st.success("登录成功，正在进入系统。")
                 st.rerun()
+            except Exception as error:
+                st.error(f"Supabase 登录失败：{error}")
+                return False
 
-    st.info(
-        "SMTP 配置请使用 App Password，不要使用邮箱登录密码。"
-        "Gmail 需要开启 2FA 后创建 App Password。"
-    )
+    st.info("Render 部署时请配置 SUPABASE_URL 和 SUPABASE_ANON_KEY。")
     return False
 
 
 def logout():
-    """Clear login state for current Streamlit session."""
+    """Clear Supabase login state for current Streamlit session."""
     for key in [
         "is_logged_in",
         "email",
         "user_id",
         "auth_mode",
-        "auth_code_hash",
-        "auth_code_salt",
-        "auth_code_email",
-        "auth_code_expires_at",
-        "auth_last_sent_at",
+        "supabase_access_token",
+        "supabase_refresh_token",
     ]:
         st.session_state.pop(key, None)
 

@@ -6,7 +6,6 @@ from uuid import uuid4
 
 
 DATA_DIR = Path("data")
-USERS_DIR = DATA_DIR / "users"
 PLAN_FILE = DATA_DIR / "plan.json"
 TRANSACTIONS_FILE = DATA_DIR / "transactions.json"
 CURRENT_STATE_FILE = DATA_DIR / "current_state.json"
@@ -26,19 +25,14 @@ def default_current_state():
 
 
 def get_user_dir(user_id=None):
-    """Return the storage folder for one user.
+    """Return the storage folder for one Supabase Auth user.
 
-    Authenticated users use data/{user_id}. The old data/users/{user_id}
-    path is still read when it already exists, so previous local data remains available.
+    The user_id must come from Supabase auth.users.id.
     """
     if not user_id:
         return DATA_DIR
     safe_user_id = "".join(char for char in str(user_id) if char.isalnum() or char in {"_", "-"})
-    new_dir = DATA_DIR / safe_user_id
-    old_dir = USERS_DIR / safe_user_id
-    if old_dir.exists() and not new_dir.exists():
-        return old_dir
-    return new_dir
+    return DATA_DIR / safe_user_id
 
 
 def get_user_files(user_id=None):
@@ -301,6 +295,9 @@ def save_current_state(state, user_id=None):
     files = get_user_files(user_id)
     write_json(files["current_state"], state or {})
     return state or {}
+
+
+
 
 
 
