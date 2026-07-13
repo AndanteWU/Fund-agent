@@ -1,6 +1,10 @@
-"""Simple JSON storage helpers for the Fund DCA Decision Support Agent."""
+"""Simple JSON storage helpers for the Fund Investor Emotion Management Agent."""
 
 import json
+import os
+from datetime import datetime
+
+from supabase_client import get_supabase_client
 from pathlib import Path
 from uuid import uuid4
 
@@ -8,20 +12,15 @@ from uuid import uuid4
 DATA_DIR = Path("data")
 PLAN_FILE = DATA_DIR / "plan.json"
 TRANSACTIONS_FILE = DATA_DIR / "transactions.json"
-CURRENT_STATE_FILE = DATA_DIR / "current_state.json"
-
-
+REVIEW_REPORTS_FILE = DATA_DIR / "review_reports.json"
 DEFAULT_TRANSACTIONS = []
+DEFAULT_REVIEW_REPORTS = []
 
 
 def default_plan_data():
     """Return an empty multi-plan structure for a newly authenticated user."""
     return {"plans": [], "selected_plan_id": None}
 
-
-def default_current_state():
-    """Return the default latest-state structure for the behavior loop."""
-    return {}
 
 
 def get_user_dir(user_id=None):
@@ -38,14 +37,12 @@ def get_user_dir(user_id=None):
 def get_user_files(user_id=None):
     """Return JSON file paths for one user."""
     base_dir = get_user_dir(user_id)
-    state_file = base_dir / "state.json"
-    legacy_state_file = base_dir / "current_state.json"
-    if legacy_state_file.exists() and not state_file.exists():
-        state_file = legacy_state_file
     return {
         "plan": base_dir / "plan.json",
         "transactions": base_dir / "transactions.json",
-        "current_state": state_file,
+        "review_reports": base_dir / "review_reports.json",
+        "current_state": base_dir / "state.json",
+        "emotion_records": base_dir / "emotion_records.json",
     }
 
 
@@ -66,7 +63,7 @@ def write_json(file_path, data):
 
 
 def ensure_data_files(user_id=None):
-    """Create empty JSON files for global data or one authenticated user."""
+    """Create long-term JSON files for one authenticated user."""
     DATA_DIR.mkdir(exist_ok=True)
     files = get_user_files(user_id)
 
@@ -74,8 +71,10 @@ def ensure_data_files(user_id=None):
         write_json(files["plan"], default_plan_data())
     if not files["transactions"].exists():
         write_json(files["transactions"], DEFAULT_TRANSACTIONS)
-    if not files["current_state"].exists():
-        write_json(files["current_state"], default_current_state())
+    if not files["review_reports"].exists():
+        write_json(files["review_reports"], DEFAULT_REVIEW_REPORTS)
+    if not files["emotion_records"].exists():
+        write_json(files["emotion_records"], [])
 
 
 def make_plan_id():
@@ -106,6 +105,11 @@ def normalize_plan(plan):
         "goal": goal,
         "investment_goal": goal,
         "max_drawdown": source.get("max_drawdown", ""),
+        "fund_code": source.get("fund_code", ""),
+        "dca_frequency": source.get("dca_frequency", "每月"),
+        "start_date": source.get("start_date", ""),
+        "end_date": source.get("end_date", ""),
+        "notes": source.get("notes", ""),
     }
 
     if source.get("created_at"):
@@ -160,6 +164,11 @@ def load_plans(user_id=None):
     return load_plan_data(user_id).get("plans", [])
 
 
+def list_fund_plans(user_id=None):
+    """List all fund plans for one authenticated user."""
+    return load_plans(user_id)
+
+
 def save_plans(user_id, data):
     """Save plan data. Accepts either the full dict or a plain plans list."""
     if isinstance(data, list):
@@ -210,6 +219,21 @@ def get_selected_plan(user_id=None):
     return {}
 
 
+def get_active_plan(user_id=None):
+    """Return the active fund plan for one authenticated user."""
+    return get_selected_plan(user_id)
+
+
+def create_fund_plan(user_id, plan_data):
+    """Create one fund plan and make it active."""
+    return add_plan(user_id, plan_data)
+
+
+def update_fund_plan(user_id, plan_id, plan_data):
+    """Update one fund plan by plan_id."""
+    return update_plan(user_id, plan_id, plan_data)
+
+
 def create_sample_plans(user_id=None):
     """Load demo plans only when the user explicitly asks for examples."""
     data = load_plan_data(user_id)
@@ -244,8 +268,10 @@ def load_plan(user_id=None):
     return get_selected_plan(user_id)
 
 
-def get_plan_by_id(plan_id, user_id=None):
-    """Find one plan by id."""
+def get_plan_by_id(user_id=None, plan_id=None):
+    """Find one plan by id. Accepts both (user_id, plan_id) and legacy (plan_id, user_id)."""
+    if plan_id is None:
+        user_id, plan_id = None, user_id
     for plan in load_plans(user_id):
         if plan.get("plan_id") == plan_id or plan.get("id") == plan_id:
             return plan
@@ -255,7 +281,7 @@ def get_plan_by_id(plan_id, user_id=None):
 def save_plan(plan, user_id=None):
     """Create or update one investment plan for backward compatibility."""
     plan_id = (plan or {}).get("plan_id") or (plan or {}).get("id")
-    if plan_id and get_plan_by_id(plan_id, user_id):
+    if plan_id and get_plan_by_id(user_id, plan_id):
         return update_plan(user_id, plan_id, plan)
     return add_plan(user_id, plan)
 
@@ -266,6 +292,23 @@ def load_transactions(user_id=None):
     files = get_user_files(user_id)
     transactions = read_json(files["transactions"], [])
     return transactions if isinstance(transactions, list) else []
+
+
+def load_transactions_for_plan(user_id=None, plan_id=None):
+    """Load operation records that belong to one active plan."""
+    if not plan_id:
+        return []
+    return [
+        record for record in load_transactions(user_id)
+        if record.get("plan_id") == plan_id
+    ]
+
+
+def list_operation_checks(user_id=None, plan_id=None):
+    """List operation checks for all plans or one specific plan."""
+    if plan_id:
+        return load_transactions_for_plan(user_id, plan_id)
+    return load_transactions(user_id)
 
 
 def save_transactions(transactions, user_id=None):
@@ -282,16 +325,59 @@ def add_transaction(transaction, user_id=None):
     return transactions
 
 
-def load_current_state(user_id=None):
-    """Load the latest behavior decision loop state for one authenticated user."""
+def load_review_reports(user_id=None):
+    """Load stored review reports for one authenticated user."""
     ensure_data_files(user_id)
     files = get_user_files(user_id)
-    state = read_json(files["current_state"], default_current_state())
-    return state if isinstance(state, dict) else default_current_state()
+    reports = read_json(files["review_reports"], [])
+    return reports if isinstance(reports, list) else []
+
+
+def save_review_reports(reports, user_id=None):
+    """Save review reports for one authenticated user."""
+    files = get_user_files(user_id)
+    write_json(files["review_reports"], reports or [])
+
+
+def list_review_reports(user_id=None, plan_id=None):
+    """List review reports for all plans or one specific plan."""
+    reports = load_review_reports(user_id)
+    if not plan_id:
+        return reports
+    return [report for report in reports if report.get("plan_id") == plan_id]
+
+
+def delete_fund_plan_with_records(user_id, plan_id):
+    """Delete one plan and its related operation/review records for the current user."""
+    data = load_plan_data(user_id)
+    plans = [plan for plan in data.get("plans", []) if plan.get("plan_id") != plan_id and plan.get("id") != plan_id]
+    selected_plan_id = plans[0].get("plan_id") if plans else None
+    save_plan_data(user_id, {"plans": plans, "selected_plan_id": selected_plan_id})
+
+    transactions = [
+        record for record in load_transactions(user_id)
+        if record.get("plan_id") != plan_id
+    ]
+    save_transactions(transactions, user_id)
+
+    reports = [
+        report for report in load_review_reports(user_id)
+        if report.get("plan_id") != plan_id
+    ]
+    save_review_reports(reports, user_id)
+
+    return {"plans": plans, "selected_plan_id": selected_plan_id}
+
+
+def load_current_state(user_id=None):
+    """Load temporary latest state for backward compatibility only."""
+    files = get_user_files(user_id)
+    state = read_json(files["current_state"], {})
+    return state if isinstance(state, dict) else {}
 
 
 def save_current_state(state, user_id=None):
-    """Save the latest behavior decision loop state, overwriting old state."""
+    """Save temporary latest state for backward compatibility only."""
     files = get_user_files(user_id)
     write_json(files["current_state"], state or {})
     return state or {}
@@ -302,4 +388,216 @@ def save_current_state(state, user_id=None):
 
 
 
+
+
+
+
+
+
+
+
+LAST_EMOTION_RECORD_ERROR = ""
+
+
+def get_last_emotion_records_error():
+    """Return the latest emotion_records read error for friendly UI hints."""
+    return LAST_EMOTION_RECORD_ERROR
+
+
+EMOTION_RECORD_FIELDS = [
+    "id",
+    "user_id",
+    "record_date",
+    "account_check_frequency",
+    "strongest_emotion",
+    "operation_impulse",
+    "impulse_source",
+    "actual_action",
+    "anxiety_level",
+    "fomo_level",
+    "impulse_level",
+    "note",
+    "ai_emotion_label",
+    "ai_risk_level",
+    "ai_behavior_biases",
+    "ai_reminder",
+    "ai_observation_point",
+    "ai_analysis",
+    "created_at",
+    "updated_at",
+]
+
+
+def get_supabase_or_none():
+    """Return Supabase when configured; use JSON fallback only without env vars."""
+    has_supabase_env = bool(os.getenv("SUPABASE_URL") and os.getenv("SUPABASE_KEY"))
+    if not has_supabase_env:
+        return None
+    return get_supabase_client()
+
+
+def make_emotion_record_id(user_id, record_date):
+    """Create a stable text id for one user + day."""
+    safe_user_id = "".join(char for char in str(user_id) if char.isalnum() or char in {"_", "-"})
+    safe_date = str(record_date or "").replace("-", "")
+    return f"emotion_{safe_user_id}_{safe_date}"
+
+
+def normalize_emotion_record_for_supabase(user_id, record):
+    """Keep only columns that exist in the Supabase emotion_records table."""
+    now = datetime.utcnow().isoformat()
+    source = dict(record or {})
+    record_date = source.get("record_date")
+    normalized = {key: source.get(key) for key in EMOTION_RECORD_FIELDS if key in source}
+    normalized["user_id"] = str(user_id)
+    normalized["record_date"] = str(record_date)
+    # Always derive the primary key from user_id + date. Older app versions used emotion_YYYYMMDD, which collides across users.
+    normalized["id"] = make_emotion_record_id(user_id, record_date)
+    normalized["updated_at"] = now
+    normalized.setdefault("created_at", source.get("created_at") or now)
+    normalized["anxiety_level"] = int(normalized.get("anxiety_level") or 0)
+    normalized["fomo_level"] = int(normalized.get("fomo_level") or 0)
+    normalized["impulse_level"] = int(normalized.get("impulse_level") or 0)
+    if normalized.get("ai_behavior_biases") is None:
+        normalized["ai_behavior_biases"] = []
+    if normalized.get("ai_analysis") is None:
+        normalized["ai_analysis"] = {}
+    return normalized
+
+
+def read_supabase_rows(response):
+    """Read data from a Supabase response object across SDK versions."""
+    rows = getattr(response, "data", None)
+    if rows is None and isinstance(response, dict):
+        rows = response.get("data")
+    return rows or []
+
+
+def load_emotion_records(user_id=None):
+    """Load all daily investor emotion records for one authenticated user from Supabase."""
+    global LAST_EMOTION_RECORD_ERROR
+    LAST_EMOTION_RECORD_ERROR = ""
+    if not user_id:
+        return []
+    supabase = get_supabase_or_none()
+    if supabase is not None:
+        try:
+            response = (
+                supabase.table("emotion_records")
+                .select("*")
+                .eq("user_id", str(user_id))
+                .order("record_date")
+                .execute()
+            )
+            rows = read_supabase_rows(response)
+            return rows if isinstance(rows, list) else []
+        except Exception as error:
+            LAST_EMOTION_RECORD_ERROR = str(error)
+            return []
+
+    ensure_data_files(user_id)
+    files = get_user_files(user_id)
+    records = read_json(files["emotion_records"], [])
+    return records if isinstance(records, list) else []
+
+
+def save_emotion_records(records, user_id=None):
+    """Save daily emotion records. Supabase is primary; JSON is local fallback."""
+    if not user_id:
+        return []
+    supabase = get_supabase_or_none()
+    if supabase is not None:
+        try:
+            normalized_records = [normalize_emotion_record_for_supabase(user_id, record) for record in (records or [])]
+            if normalized_records:
+                supabase.table("emotion_records").upsert(
+                    normalized_records,
+                    on_conflict="user_id,record_date",
+                ).execute()
+            return normalized_records
+        except Exception as error:
+            raise RuntimeError(f"Supabase 保存 emotion_records 失败：{error}") from error
+
+    files = get_user_files(user_id)
+    write_json(files["emotion_records"], records or [])
+    return records or []
+
+
+def upsert_emotion_record(user_id, record):
+    """Create or update one record by user_id + record_date in Supabase."""
+    if not user_id:
+        raise ValueError("保存情绪记录失败：缺少 user_id。")
+    record_date = (record or {}).get("record_date")
+    if not record_date:
+        raise ValueError("保存情绪记录失败：缺少 record_date。")
+    normalized = normalize_emotion_record_for_supabase(user_id, record)
+    supabase = get_supabase_or_none()
+    if supabase is not None:
+        try:
+            response = (
+                supabase.table("emotion_records")
+                .upsert(normalized, on_conflict="user_id,record_date")
+                .execute()
+            )
+            rows = read_supabase_rows(response)
+            return rows[0] if rows else normalized
+        except Exception as error:
+            raise RuntimeError(f"Supabase 写入 emotion_records 失败：{error}") from error
+
+    records = load_emotion_records(user_id)
+    replaced = False
+    for index, existing in enumerate(records):
+        if existing.get("record_date") == record_date:
+            records[index] = {**existing, **record}
+            replaced = True
+            break
+    if not replaced:
+        records.append(record)
+    files = get_user_files(user_id)
+    write_json(files["emotion_records"], records)
+    return record
+
+
+def delete_emotion_record(user_id, record_date):
+    """Delete one daily emotion record for the current Supabase user."""
+    if not user_id or not record_date:
+        return []
+    supabase = get_supabase_or_none()
+    if supabase is not None:
+        try:
+            supabase.table("emotion_records").delete().eq("user_id", str(user_id)).eq("record_date", str(record_date)).execute()
+            return load_emotion_records(user_id)
+        except Exception as error:
+            raise RuntimeError(f"Supabase 删除 emotion_records 失败：{error}") from error
+
+    records = [record for record in load_emotion_records(user_id) if record.get("record_date") != record_date]
+    files = get_user_files(user_id)
+    write_json(files["emotion_records"], records)
+    return records
+
+
+def get_emotion_record_by_date(user_id, record_date):
+    """Return one daily emotion record by user_id + date from Supabase."""
+    if not user_id or not record_date:
+        return {}
+    supabase = get_supabase_or_none()
+    if supabase is not None:
+        try:
+            response = (
+                supabase.table("emotion_records")
+                .select("*")
+                .eq("user_id", str(user_id))
+                .eq("record_date", str(record_date))
+                .limit(1)
+                .execute()
+            )
+            rows = read_supabase_rows(response)
+            return rows[0] if rows else {}
+        except Exception as error:
+            raise RuntimeError(f"Supabase 查询 emotion_records 失败：{error}") from error
+
+    for record in load_emotion_records(user_id):
+        if record.get("record_date") == record_date:
+            return record
+    return {}
 

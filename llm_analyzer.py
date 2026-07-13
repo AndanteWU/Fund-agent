@@ -1,4 +1,4 @@
-"""DeepSeek-based behavior diagnosis for fund DCA operations."""
+"""DeepSeek-based behavior and emotion analysis helpers."""
 
 import json
 import os
@@ -221,7 +221,7 @@ def analyze_operation_reason(
     client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
 
     system_prompt = f"""
-你是“基金定投辅助决策 Agent”中的 Educational Behavioral Finance Agent，服务投资新手和非专业投资者。
+你是“基金投资情绪管理 Agent”中的 Educational Behavioral Finance Agent，服务投资新手和非专业投资者。
 
 你的任务不是分析基金好坏，不是预测市场，也不是提供买卖操作建议，而是把用户的一次定投相关操作，解释成一份有教育意义的行为金融报告。报告要像在讲一个投资心理故事，而不是输出一组冷冰冰的技术标签。
 
@@ -294,4 +294,124 @@ JSON 字段必须包括：
 
 
 
+
+
+
+
+def build_fallback_emotion_analysis(record):
+    """Rule-based fallback for daily investor emotion analysis."""
+    anxiety = int(record.get("anxiety_level", 0) or 0)
+    fomo = int(record.get("fomo_level", 0) or 0)
+    impulse = int(record.get("impulse_level", 0) or 0)
+    emotion = record.get("strongest_emotion", "平静")
+    impulse_text = record.get("operation_impulse", "没有")
+    source = record.get("impulse_source", "其他")
+    account_check = record.get("account_check_frequency", "没看")
+
+    biases = []
+    if fomo >= 6 or "买入" in impulse_text or "加仓" in impulse_text or "上涨" in source:
+        biases.append("FOMO")
+    if anxiety >= 6 or "下跌" in source or "亏损" in source or emotion in {"焦虑", "恐惧"}:
+        biases.append("亏损厌恶")
+    if account_check == "反复查看":
+        biases.append("过度看盘")
+    if "朋友" in source or "博主" in source:
+        biases.append("羊群效应")
+    if impulse >= 7:
+        biases.append("冲动交易倾向")
+    if not biases:
+        biases.append("暂无明显偏差")
+
+    max_score = max(anxiety, fomo, impulse)
+    if max_score >= 8:
+        risk = "高"
+        label = "高风险情绪型"
+    elif max_score >= 5:
+        risk = "中"
+        label = "FOMO冲动型" if fomo >= anxiety and fomo >= impulse else "轻微焦虑型"
+    elif impulse_text != "没有":
+        risk = "中"
+        label = "犹豫观望型"
+    elif emotion in {"后悔", "麻木"}:
+        risk = "中"
+        label = "后悔反刍型"
+    else:
+        risk = "低"
+        label = "平静执行型"
+
+    return {
+        "emotion_label": label,
+        "risk_level": risk,
+        "behavior_biases": biases[:3],
+        "one_sentence_reminder": "请把今天的投资情绪当作观察对象，而不是立刻行动的理由。",
+        "observation_point": "接下来几天观察自己是否继续反复看盘、焦虑或产生临时改变计划的冲动。",
+        "final_disclaimer": FINAL_DISCLAIMER,
+        "fallback": True,
+    }
+
+
+def normalize_emotion_analysis(data, source_record=None):
+    """Normalize AI output into the daily emotion analysis shape."""
+    if not isinstance(data, dict):
+        return build_fallback_emotion_analysis(source_record or {})
+    biases = data.get("behavior_biases") or []
+    if isinstance(biases, str):
+        biases = [biases]
+    clean_biases = [str(item).strip() for item in biases if str(item).strip()]
+    risk_level = data.get("risk_level") if data.get("risk_level") in {"低", "中", "高"} else "中"
+    return {
+        "emotion_label": data.get("emotion_label") or "轻微波动型",
+        "risk_level": risk_level,
+        "behavior_biases": clean_biases or ["暂无明显偏差"],
+        "one_sentence_reminder": data.get("one_sentence_reminder") or "今天的记录更适合用来观察情绪，而不是作为行动信号。",
+        "observation_point": data.get("observation_point") or "后续观察这种情绪是否连续出现。",
+        "final_disclaimer": data.get("final_disclaimer") or FINAL_DISCLAIMER,
+        "fallback": False,
+    }
+
+
+def analyze_daily_emotion(record):
+    """Use DeepSeek to analyze one daily investor emotion record; fallback to rules if unavailable."""
+    if OpenAI is None:
+        return build_fallback_emotion_analysis(record)
+    api_key = os.getenv("DEEPSEEK_API_KEY")
+    if not api_key:
+        return build_fallback_emotion_analysis(record)
+
+    client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
+    system_prompt = f"""
+你是“基金投资情绪管理 Agent”的情绪识别助手。
+你的任务是根据用户当天的投资情绪记录，识别情绪标签、风险等级和行为金融偏差。
+你不能预测市场涨跌，不能评价基金好坏，不能提供买入、卖出、加仓、减仓建议。
+只输出严格 JSON，不要 Markdown，不要解释 JSON 外的任何内容。
+JSON 字段必须包含：emotion_label, risk_level, behavior_biases, one_sentence_reminder, observation_point, final_disclaimer。
+risk_level 只能是：低、中、高。
+behavior_biases 从这些标签中选择：FOMO、亏损厌恶、过度自信、羊群效应、可得性偏差、近期收益外推、过度看盘、后悔厌恶、冲动交易倾向、暂无明显偏差。
+final_disclaimer 必须是：{FINAL_DISCLAIMER}
+"""
+    user_prompt = f"""
+查看账户频率：{record.get('account_check_frequency')}
+最强烈情绪：{record.get('strongest_emotion')}
+操作冲动：{record.get('operation_impulse')}
+冲动来源：{record.get('impulse_source')}
+实际操作：{record.get('actual_action')}
+焦虑分数：{record.get('anxiety_level')}
+FOMO 分数：{record.get('fomo_level')}
+冲动分数：{record.get('impulse_level')}
+用户一句话记录：{record.get('note')}
+"""
+    try:
+        response = client.chat.completions.create(
+            model="deepseek-v4-flash",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.2,
+        )
+        data = extract_json(response.choices[0].message.content)
+        return normalize_emotion_analysis(data, record)
+    except Exception:
+        return build_fallback_emotion_analysis(record)
 
